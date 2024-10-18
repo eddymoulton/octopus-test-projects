@@ -18,9 +18,13 @@ provider "octopusdeploy" {
 resource "random_pet" "main" {
 }
 
+locals {
+  unique_name = "${terraform.workspace == "default" ? random_pet.main.id : terraform.workspace}"
+}
+
 resource "octopusdeploy_docker_container_registry" "docker" {
   api_version = "v2"
-  name        = "container_docker-${random_pet.main.id}"
+  name        = "container_docker-${local.unique_name}"
   feed_uri    = "https://index.docker.io"
   space_id    = var.space_id
 
@@ -29,14 +33,14 @@ resource "octopusdeploy_docker_container_registry" "docker" {
 }
 
 resource "octopusdeploy_helm_feed" "helm_examples" {
-  name     = "helm_examples-${random_pet.main.id}"
+  name     = "helm_examples-${local.unique_name}"
   feed_uri = "https://helm.github.io/examples"
   space_id = var.space_id
 }
 
 resource "octopusdeploy_lifecycle" "main" {
   description = "Testing lifecycle"
-  name        = "terraform-${random_pet.main.id}"
+  name        = "terraform-${local.unique_name}"
   space_id    = var.space_id
 
   release_retention_policy {
@@ -59,7 +63,7 @@ resource "octopusdeploy_lifecycle" "main" {
 
 resource "octopusdeploy_project_group" "main" {
   description = "Terraform projects"
-  name        = "terraform-projects-${random_pet.main.id}"
+  name        = "terraform-projects-${local.unique_name}"
   space_id    = var.space_id
 }
 
@@ -69,7 +73,7 @@ module "project" {
 
   space_id         = var.space_id
   environment_id   = var.environment_id
-  project_name     = "${random_pet.main.id}-${each.value}"
+  project_name     = "${local.unique_name}-${each.value}"
   project_group_id = octopusdeploy_project_group.main.id
   lifecycle_id     = octopusdeploy_lifecycle.main.id
 
