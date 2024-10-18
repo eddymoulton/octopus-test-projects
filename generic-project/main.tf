@@ -73,7 +73,7 @@ module "project" {
   project_group_id = octopusdeploy_project_group.main.id
   lifecycle_id     = octopusdeploy_lifecycle.main.id
 
-  k8s_target_role                     = var.k8s_target_role
+  target_role                     = var.target_role
   auto_create_release                 = var.auto_create_release
   auto_create_release_minute_interval = var.auto_create_release_minute_interval
 

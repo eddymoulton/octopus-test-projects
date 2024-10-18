@@ -14,7 +14,7 @@ resource "octopusdeploy_deployment_process" "main" {
   step {
     condition    = "Always"
     name         = "yaml-guestbook"
-    target_roles = [var.k8s_target_role]
+    target_roles = [var.target_role]
 
     action {
       name          = "yaml-guestbook"
@@ -35,7 +35,7 @@ resource "octopusdeploy_deployment_process" "main" {
   step {
     condition    = "Always"
     name         = "helm-hello-world"
-    target_roles = [var.k8s_target_role]
+    target_roles = [var.target_role]
 
     action {
       name        = "helm-hello-world"
@@ -58,7 +58,7 @@ resource "octopusdeploy_deployment_process" "main" {
 
   step {
     name         = "deploy-kubernetes-config-map-resource"
-    target_roles = [var.k8s_target_role]
+    target_roles = [var.target_role]
 
     action {
       name        = "deploy-kubernetes-config-map-resource"
@@ -77,7 +77,7 @@ resource "octopusdeploy_deployment_process" "main" {
   step {
     condition    = "Always"
     name         = "deploy-kubernetes-containers"
-    target_roles = [var.k8s_target_role]
+    target_roles = [var.target_role]
 
     action {
       name        = "deploy-kubernetes-containers"
@@ -117,7 +117,7 @@ resource "octopusdeploy_deployment_process" "main" {
   step {
     condition    = "Always"
     name         = "deploy-kubernetes-ingress-resource"
-    target_roles = [var.k8s_target_role]
+    target_roles = [var.target_role]
 
     action {
       name        = "deploy-kubernetes-ingress-resource"
@@ -139,7 +139,7 @@ resource "octopusdeploy_deployment_process" "main" {
   step {
     condition    = "Always"
     name         = "deploy-kubernetes-secret-resource"
-    target_roles = [var.k8s_target_role]
+    target_roles = [var.target_role]
 
     deploy_kubernetes_secret_action {
       name = "deploy-kubernetes-secret-resource"
@@ -158,7 +158,7 @@ resource "octopusdeploy_deployment_process" "main" {
   step {
     condition    = "Always"
     name         = "deploy-kubernetes-service-resource"
-    target_roles = [var.k8s_target_role]
+    target_roles = [var.target_role]
 
     action {
       name        = "deploy-kubernetes-service-resource"

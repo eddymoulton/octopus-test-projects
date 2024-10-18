@@ -59,7 +59,7 @@ module "everything_process" {
   space_id        = var.space_id
   project_id      = octopusdeploy_project.main.id
   k8s_namespace   = var.project_name
-  k8s_target_role = var.k8s_target_role
+  target_role = var.target_role
   docker_feed_id  = var.docker_feed_id
   helm_feed_id    = var.helm_feed_id
 }
@@ -71,5 +71,5 @@ module "argo_process" {
   space_id        = var.space_id
   project_id      = octopusdeploy_project.main.id
   k8s_namespace   = var.project_name
-  k8s_target_role = var.k8s_target_role
+  target_role = var.target_role
 }

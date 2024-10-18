@@ -14,7 +14,7 @@ resource "octopusdeploy_deployment_process" "main" {
   step {
     condition    = "Always"
     name         = "yaml-argo"
-    target_roles = [var.k8s_target_role]
+    target_roles = [var.target_role]
 
     action {
       name          = "yaml-argo"

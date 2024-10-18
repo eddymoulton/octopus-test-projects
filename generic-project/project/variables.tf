@@ -18,7 +18,7 @@ variable lifecycle_id {
   type = string
 }
 
-variable k8s_target_role {
+variable target_role {
   type = string
 }
 

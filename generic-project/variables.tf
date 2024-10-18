@@ -1,3 +1,4 @@
+# Basic config
 variable server_address {
   type    = string
   default = "http://localhost:8066/"
@@ -7,17 +8,6 @@ variable access_token {
   type      = string
   sensitive = true
   default   = "API-APIKEY01"
-}
-
-variable docker_username {
-  type = string
-  default = "<TODO>"
-}
-
-variable docker_password {
-  type      = string
-  sensitive = true
-  default = "<TODO>"
 }
 
 variable space_id {
@@ -30,9 +20,38 @@ variable environment_id {
   default = "Environments-1"
 }
 
-variable k8s_target_role {
+variable target_role {
   type    = string
   default = "k8s"
+}
+
+# Feeds
+variable docker_username {
+  type = string
+  default = "<TODO>"
+}
+
+variable docker_password {
+  type      = string
+  sensitive = true
+  default = "<TODO>"
+}
+
+# Project config
+variable number_of_projects {
+  type    = number
+  default = 1
+}
+
+## Sets the deployment process for all created projects to one of the modules under ./deployment_processes
+variable process_type {
+  type    = string
+  default = "everything"
+
+  validation {
+    condition     = contains(["everything", "argo"], var.process_type)
+    error_message = "Unknown process type"
+  }
 }
 
 variable auto_create_release {
@@ -43,19 +62,4 @@ variable auto_create_release {
 variable auto_create_release_minute_interval {
   type    = number
   default = 10
-}
-
-variable number_of_projects {
-  type    = number
-  default = 1
-}
-
-variable process_type {
-  type    = string
-  default = "everything"
-
-  validation {
-    condition     = contains(["everything", "argo"], var.process_type)
-    error_message = "Unknown process type"
-  }
 }
