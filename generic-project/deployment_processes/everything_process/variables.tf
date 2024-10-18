@@ -1,23 +1,23 @@
-variable space_id {
+variable "space_id" {
   type = string
 }
 
-variable project_id {
+variable "project_id" {
   type = string
 }
 
-variable k8s_namespace {
+variable "k8s_namespace" {
   type = string
 }
 
-variable target_role {
+variable "target_role" {
   type = string
 }
 
-variable docker_feed_id {
+variable "docker_feed_id" {
   type = string
 }
 
-variable helm_feed_id {
+variable "helm_feed_id" {
   type = string
 }

@@ -13,7 +13,7 @@ resource "octopusdeploy_project" "main" {
   auto_create_release                  = false
   default_guided_failure_mode          = "EnvironmentDefault"
   default_to_skip_if_already_installed = false
-  description                          = "Terraform cretaed"
+  description                          = "Terraform created"
   discrete_channel_release             = false
   is_disabled                          = false
   is_discrete_channel_release          = false
@@ -31,7 +31,7 @@ resource "octopusdeploy_channel" "main" {
 }
 
 resource "octopusdeploy_project_scheduled_trigger" "main" {
-  for_each = var.auto_create_release == true ? toset([1]) : toset([])
+  for_each = var.auto_create_release == true ? toset(["trigger"]) : toset([])
 
   name       = octopusdeploy_project.main.id
   space_id   = var.space_id
@@ -56,20 +56,20 @@ module "everything_process" {
   for_each = var.process == "everything" ? toset(["process"]) : toset([])
   source   = "../deployment_processes/everything_process"
 
-  space_id        = var.space_id
-  project_id      = octopusdeploy_project.main.id
-  k8s_namespace   = var.project_name
-  target_role = var.target_role
-  docker_feed_id  = var.docker_feed_id
-  helm_feed_id    = var.helm_feed_id
+  space_id       = var.space_id
+  project_id     = octopusdeploy_project.main.id
+  k8s_namespace  = var.project_name
+  target_role    = var.target_role
+  docker_feed_id = var.docker_feed_id
+  helm_feed_id   = var.helm_feed_id
 }
 
 module "argo_process" {
   for_each = var.process == "argo" ? toset(["process"]) : toset([])
   source   = "../deployment_processes//argo_install_process"
 
-  space_id        = var.space_id
-  project_id      = octopusdeploy_project.main.id
-  k8s_namespace   = var.project_name
-  target_role = var.target_role
+  space_id      = var.space_id
+  project_id    = octopusdeploy_project.main.id
+  k8s_namespace = var.project_name
+  target_role   = var.target_role
 }

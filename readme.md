@@ -8,6 +8,8 @@
 - `docker_password`
 - `target_role`
 
+Add a `variables.auto.tfvars` file to automatically apply vars
+
 ## Changing other settings
 
 `variables.tf` is commented with 
