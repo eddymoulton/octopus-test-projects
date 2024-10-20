@@ -12,8 +12,8 @@ Add a `variables.auto.tfvars` file to automatically apply vars
 
 ## Changing other settings
 
-`variables.tf` is commented with 
+`variables.tf` is commented with some short hints about what does what
 
 ## Multiple instances
 
-Use `terraform workspace` to manage creating multiple instances or combinations of this project
+Use `terraform workspace` to manage creating multiple instances or combinations of a project
