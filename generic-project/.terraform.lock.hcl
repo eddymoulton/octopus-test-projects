@@ -5,6 +5,7 @@ provider "registry.terraform.io/hashicorp/random" {
   version = "3.6.3"
   hashes = [
     "h1:Fnaec9vA8sZ8BXVlN3Xn9Jz3zghSETIKg7ch8oXhxno=",
+    "h1:zG9uFP8l9u+yGZZvi5Te7PV62j50azpgwPunq2vTm1E=",
     "zh:04ceb65210251339f07cd4611885d242cd4d0c7306e86dda9785396807c00451",
     "zh:448f56199f3e99ff75d5c0afacae867ee795e4dfda6cb5f8e3b2a72ec3583dd8",
     "zh:4b4c11ccfba7319e901df2dac836b1ae8f12185e37249e8d870ee10bb87a13fe",
@@ -25,6 +26,7 @@ provider "registry.terraform.io/octopusdeploylabs/octopusdeploy" {
   constraints = "0.32.0"
   hashes = [
     "h1:ZlNy3FwFWE/LX0fWUQxBdxc5knU08z1PiT0AMqoDbQw=",
+    "h1:y1lGE6QKxfFxuThGZPZCcFP5VwtqCSRisiV1KiP+LG8=",
     "zh:3ca728f8313eddd037ceef10e0d77037d142ec37767b45ec916077c20a3311e5",
     "zh:4b3e18aa7737062f2892476168882783195972fff2578123a5a652473940e7bf",
     "zh:669b32c8a264c26c01cc362bc0c9cca767eee392c5f8d6b3d8c858b9fe4ebc43",

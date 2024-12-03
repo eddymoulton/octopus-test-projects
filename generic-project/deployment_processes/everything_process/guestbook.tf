@@ -3,7 +3,7 @@ locals {
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: guestbook-ui
+  name: yaml-guestbook-ui
 spec:
   replicas: 1
   revisionHistoryLimit: 3
@@ -25,7 +25,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: guestbook-ui
+  name: yaml-guestbook-ui
 spec:
   ports:
   - port: 80
