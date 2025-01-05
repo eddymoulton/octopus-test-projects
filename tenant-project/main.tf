@@ -90,3 +90,15 @@ module "project" {
 
   process = var.process_type
 }
+
+resource "octopusdeploy_tenant" "a" {
+  name = "Tenant A"
+}
+
+resource "octopusdeploy_tenant_project" "a" {
+  for_each = { for x in range(0, var.number_of_projects) : x => "${local.unique_name}-${x}" }
+
+  project_id      = module.project[each.key].project_id
+  tenant_id       = octopusdeploy_tenant.a.id
+  environment_ids = [var.environment_id]
+}

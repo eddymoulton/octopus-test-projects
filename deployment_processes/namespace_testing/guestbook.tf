@@ -1,0 +1,86 @@
+locals {
+  guestbook_with_ns_yaml = <<-EOT
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: yaml-guestbook-ui-manifest-ns
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yaml-guestbook-ui
+  namespace: yaml-guestbook-ui-manifest-ns
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: guestbook-ui
+  template:
+    metadata:
+      labels:
+        app: guestbook-ui
+    spec:
+      containers:
+      - image: gcr.io/heptio-images/ks-guestbook-demo:0.2
+        name: guestbook-ui
+        ports:
+        - containerPort: 80
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yaml-guestbook-ui
+  namespace: yaml-guestbook-ui-manifest-ns
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: guestbook-ui
+EOT
+
+  guestbook_without_ns_yaml = <<-EOT
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: yaml-guestbook-ui-no-ns
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yaml-guestbook-ui
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: guestbook-ui
+  template:
+    metadata:
+      labels:
+        app: guestbook-ui
+    spec:
+      containers:
+      - image: gcr.io/heptio-images/ks-guestbook-demo:0.2
+        name: guestbook-ui
+        ports:
+        - containerPort: 80
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yaml-guestbook-ui
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: guestbook-ui
+EOT
+
+}
