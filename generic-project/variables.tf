@@ -7,7 +7,6 @@ variable "server_address" {
 variable "access_token" {
   type      = string
   sensitive = true
-  default   = "API-APIKEY01"
 }
 
 variable "space_name" {

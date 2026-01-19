@@ -18,7 +18,6 @@ terraform {
 }
 
 locals {
-  octopus_api_key                = "API-APIKEY01"
   octopus_address                = "http://localhost:8065/"
   colima_octopus_address         = "http://host.lima.internal:8065/"
   colima_octopus_grpc_address    = "grpc://host.lima.internal:8443"
@@ -37,7 +36,7 @@ provider "helm" {
 
 provider "octopusdeploy" {
   address = local.octopus_address
-  api_key = local.octopus_api_key
+  api_key = var.octopus_api_key
 }
 
 data "octopusdeploy_teams" "everyone" {
@@ -155,7 +154,7 @@ resource "helm_release" "kubernetes_agent" {
   set_sensitive = [
     {
       name  = "agent.serverApiKey"
-      value = local.octopus_api_key
+      value = var.octopus_api_key
     },
     {
       name  = "agent.certificate"
