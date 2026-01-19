@@ -15,11 +15,6 @@ variable "space_name" {
   default = "Default"
 }
 
-variable "space_id" {
-  type    = string
-  default = "Spaces-1"
-}
-
 variable "environment_id" {
   type    = string
   default = "Environments-1"

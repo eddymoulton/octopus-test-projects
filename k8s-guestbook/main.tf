@@ -25,6 +25,16 @@ locals {
   colima_octopus_polling_address = "http://host.lima.internal:10943/"
 }
 
+provider "kubernetes" {
+  config_path = "~/.kube/config"
+}
+
+provider "helm" {
+  kubernetes = {
+    config_path = "~/.kube/config"
+  }
+}
+
 provider "octopusdeploy" {
   address = local.octopus_address
   api_key = local.octopus_api_key
@@ -169,34 +179,55 @@ resource "helm_release" "kubernetes_agent" {
   ]
 }
 
-# Second space
-resource "octopusdeploy_space" "monitoring-2" {
-  name                 = "Kubernetes Examples 2"
-  description          = "Terraform created examples"
-  space_managers_teams = [data.octopusdeploy_teams.everyone.teams[0].id]
+resource "octopusdeploy_lifecycle" "main" {
+  description = "Testing lifecycle"
+  name        = "terraform-created"
+  space_id    = octopusdeploy_space.monitoring.id
+
+  release_retention_policy {
+    quantity_to_keep    = 1
+    should_keep_forever = false
+    unit                = "Days"
+  }
+
+  tentacle_retention_policy {
+    quantity_to_keep    = 30
+    should_keep_forever = false
+    unit                = "Items"
+  }
+
+  phase {
+    automatic_deployment_targets = [octopusdeploy_environment.example.id]
+    name                         = "terraform"
+  }
 }
 
-resource "octopusdeploy_environment" "example-2" {
-  name     = "Example"
-  space_id = octopusdeploy_space.monitoring-2.id
+resource "octopusdeploy_project_group" "main" {
+  description = "Terraform projects"
+  name        = "terraform-created"
+  space_id    = octopusdeploy_space.monitoring.id
 }
 
-# Create the Kubernetes agent deployment target
-resource "octopusdeploy_kubernetes_agent_deployment_target" "example-2" {
-  name         = "Example Kubernetes Agent"
-  space_id     = octopusdeploy_space.monitoring-2.id
-  environments = [octopusdeploy_environment.example-2.id]
-  roles        = ["k8s-agent", "monitoring-enabled"]
+resource "octopusdeploy_project" "main" {
+  space_id = octopusdeploy_space.monitoring.id
 
-  thumbprint = octopusdeploy_tentacle_certificate.agent_cert.thumbprint
-  uri        = octopusdeploy_polling_subscription_id.agent_subscription_id.polling_uri
+  default_guided_failure_mode          = "EnvironmentDefault"
+  default_to_skip_if_already_installed = false
+  description                          = "Terraform created"
+  is_disabled                          = false
+  is_discrete_channel_release          = false
+  lifecycle_id                         = octopusdeploy_lifecycle.main.id
+  name                                 = "Terraform created"
+  tenanted_deployment_participation    = "Untenanted"
+  included_library_variable_sets       = []
+  project_group_id                     = octopusdeploy_project_group.main.id
 }
 
-# Create the Kubernetes monitor
-resource "octopusdeploy_kubernetes_monitor" "example-2" {
-  space_id                      = octopusdeploy_space.monitoring-2.id
-  installation_id               = random_uuid.monitor_installation.result
-  machine_id                    = octopusdeploy_kubernetes_agent_deployment_target.example-2.id
-  preserve_authentication_token = true
-}
+module "guestbook_process" {
+  source = "../deployment_processes/guestbook_process"
 
+  space_id      = octopusdeploy_space.monitoring.id
+  project_id    = octopusdeploy_project.main.id
+  k8s_namespace = octopusdeploy_project.main.slug
+  target_role   = "k8s-agent"
+}
