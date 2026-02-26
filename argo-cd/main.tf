@@ -85,8 +85,8 @@ resource "octopusdeploy_project_group" "argo_cd_samples" {
   space_id    = octopusdeploy_space.main.id
 }
 
-resource "octopusdeploy_library_variable_set" "calamari_debugging" {
-  name     = "Calamari Debugging"
+resource "octopusdeploy_library_variable_set" "calamari_local" {
+  name     = "Calamari Local"
   space_id = octopusdeploy_space.main.id
 }
 
@@ -94,7 +94,12 @@ resource "octopusdeploy_variable" "calamari_executable" {
   name     = "Octopus.Calamari.Executable"
   type     = "String"
   value    = "/Users/eddy/octo/Calamari/source/Calamari/bin/Debug/net8.0/Calamari"
-  owner_id = octopusdeploy_library_variable_set.calamari_debugging.id
+  owner_id = octopusdeploy_library_variable_set.calamari_local.id
+  space_id = octopusdeploy_space.main.id
+}
+
+resource "octopusdeploy_library_variable_set" "calamari_debugging" {
+  name     = "Calamari Debugging"
   space_id = octopusdeploy_space.main.id
 }
 

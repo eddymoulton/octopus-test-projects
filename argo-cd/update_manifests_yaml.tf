@@ -21,7 +21,7 @@ resource "octopusdeploy_process_step" "update_manifests_yaml" {
   process_id = octopusdeploy_process.update_manifests_yaml.id
   space_id   = octopusdeploy_space.main.id
   name       = "Update Image Tags"
-  type       = "Octopus.ArgoCDUpdateImageTags"
+  type       = "Octopus.ArgoCDUpdateManifests"
   execution_properties = {
     "Octopus.Action.ArgoCD.CommitMessageSummary" : "Octopus Deploy updated image versions",
     "Octopus.Action.ArgoCD.CommitMethod" : "DirectCommit"
