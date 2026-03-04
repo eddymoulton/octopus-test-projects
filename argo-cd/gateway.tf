@@ -1,6 +1,6 @@
 resource "kubernetes_namespace_v1" "example" {
   metadata {
-    name = "octopus-argo-gateway-example"
+    name = "octopus-argo-gateway-${terraform.workspace}"
   }
 }
 
@@ -10,7 +10,7 @@ resource "helm_release" "argo_gateway" {
   chart      = "octopusdeploy/octopus-argocd-gateway-chart"
   version    = "1.15.0"
   atomic     = true
-  namespace  = "octopus-argo-gateway-example"
+  namespace  = "octopus-argo-gateway-${terraform.workspace}"
   timeout    = 60
   set = [
     {
