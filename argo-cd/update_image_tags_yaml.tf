@@ -27,20 +27,9 @@ resource "octopusdeploy_process_step" "update_image_tags_yaml" {
     "Octopus.Action.ArgoCD.CommitMethod" : "DirectCommit"
   }
   packages = {
-    "octopub-products-microservice" : {
+    "nginx" : {
       feed_id              = octopusdeploy_docker_container_registry.docker.id
-      package_id           = "octopussamples/octopub-products-microservice"
-      acquisition_location = "NotAcquired"
-      properties = {
-        "SelectionMode" = "immediate"
-        "Extract"       = "False"
-        "Purpose"       = "DockerImageReference"
-
-      }
-    },
-    "octopub-frontend" : {
-      feed_id              = octopusdeploy_docker_container_registry.docker.id
-      package_id           = "octopussamples/octopub-frontend"
+      package_id           = "nginx"
       acquisition_location = "NotAcquired"
       properties = {
         "SelectionMode" = "immediate"
@@ -48,9 +37,9 @@ resource "octopusdeploy_process_step" "update_image_tags_yaml" {
         "Purpose"       = "DockerImageReference"
       }
     },
-    "octopub-audit-microservice" : {
+    "redis" : {
       feed_id              = octopusdeploy_docker_container_registry.docker.id
-      package_id           = "octopussamples/octopub-audit-microservice"
+      package_id           = "redis"
       acquisition_location = "NotAcquired"
       properties = {
         "SelectionMode" = "immediate"
