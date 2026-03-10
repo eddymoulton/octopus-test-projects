@@ -18,7 +18,9 @@ resource "octopusdeploy_process_step" "yaml" {
   name       = "yaml-guestbook"
   type       = "Octopus.KubernetesDeployRawYaml"
   properties = {
-    "Octopus.Action.TargetRoles"                               = var.target_role
+    "Octopus.Action.TargetRoles" = var.target_role
+  }
+  execution_properties = {
     "Octopus.Action.Kubernetes.DeploymentTimeout"              = "180"
     "Octopus.Action.Kubernetes.ResourceStatusCheck"            = "True"
     "Octopus.Action.Kubernetes.ServerSideApply.Enabled"        = "True"
