@@ -26,7 +26,7 @@ resource "octopusdeploy_process_step" "yaml" {
     "Octopus.Action.Kubernetes.ServerSideApply.Enabled"        = "True"
     "Octopus.Action.Kubernetes.ServerSideApply.ForceConflicts" = "True"
     "Octopus.Action.KubernetesContainers.CustomResourceYaml"   = local.guestbook_yaml
-    "Octopus.Action.KubernetesContainers.Namespace"            = "terraform-yaml-guestbook-${var.k8s_namespace}"
+    "Octopus.Action.KubernetesContainers.Namespace"            = "terraform-yaml-guestbook-${var.k8s_namespace}-#{Octopus.Environment.Name | ToLower}-#{if Octopus.Deployment.Tenant.Name}#{Octopus.Deployment.Tenant.Name | ToLower}#{/if}"
     "Octopus.Action.Script.ScriptSource"                       = "Inline"
   }
 }
