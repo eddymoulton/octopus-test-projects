@@ -12,7 +12,7 @@ data "octopusdeploy_teams" "everyone" {
 }
 
 resource "octopusdeploy_space" "main" {
-  name                 = "K8s Agent Examples"
+  name                 = "K8s Agent Examples ${terraform.workspace}"
   description          = "Terraform created K8s agent examples"
   space_managers_teams = [data.octopusdeploy_teams.everyone.teams[0].id]
 }

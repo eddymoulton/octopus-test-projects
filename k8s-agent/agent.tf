@@ -26,7 +26,7 @@ resource "kubernetes_namespace_v1" "agent" {
 }
 
 resource "helm_release" "kubernetes_agent" {
-  name       = "k8s-agent"
+  name       = "k8s-agent-${replace(terraform.workspace, ".", "-")}"
   repository = "oci://registry-1.docker.io"
   chart      = "octopusdeploy/kubernetes-agent"
   version    = "2.34.0"
