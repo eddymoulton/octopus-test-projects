@@ -9,7 +9,7 @@ USERNAME="gateway"
 echo 'Deploying ArgoCD'
 # Idempotent namespace creation
 kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 
 echo 'Waiting for ArgoCD server to be ready'
 kubectl wait --for=condition=available deployment/argocd-server -n argocd --timeout=180s
