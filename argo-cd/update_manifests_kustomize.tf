@@ -37,9 +37,9 @@ resource "octopusdeploy_process_step" "update_manifests_kustomize" {
         "Purpose"       = "DockerImageReference"
       }
     },
-    "redis" : {
+    "busybox" : {
       feed_id              = octopusdeploy_docker_container_registry.docker.id
-      package_id           = "redis"
+      package_id           = "busybox"
       acquisition_location = "NotAcquired"
       properties = {
         "SelectionMode" = "immediate"
