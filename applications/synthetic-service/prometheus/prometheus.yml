@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: 'synthetic-service'
+    static_configs:
+      - targets:
+          - 'checkout-prod:8080'
+          - 'checkout-staging:8080'
+          - 'payments-prod-acme:8080'
+          - 'payments-prod-globex:8080'
+          - 'payments-staging:8080'

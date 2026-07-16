@@ -1,0 +1,87 @@
+name: synthetic-service image
+
+# Builds and publishes the synthetic-service image to GHCR. The Octopus
+# "checkout"/"payments" projects (see live-status/) pull this image from a
+# Docker feed pointed at ghcr.io and pick a tag at release creation.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "applications/synthetic-service/**"
+      - ".github/workflows/synthetic-service-image.yml"
+  pull_request:
+    paths:
+      - "applications/synthetic-service/**"
+      - ".github/workflows/synthetic-service-image.yml"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/synthetic-service
+  APP_DIR: applications/synthetic-service
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
+          cache-dependency-path: ${{ env.APP_DIR }}/go.sum
+
+      - name: go vet
+        working-directory: ${{ env.APP_DIR }}
+        run: go vet ./...
+
+      - name: go test
+        working-directory: ${{ env.APP_DIR }}
+        run: go test ./...
+
+  publish:
+    # Test-only on PRs; publish on push-to-main and manual dispatch.
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # QEMU + buildx so the amd64 GitHub runner can build the arm64 variant
+      # the Colima/Lima cluster (Apple Silicon) needs.
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Auto-incrementing, SemVer-ordered version + traceable sha + latest.
+          tags: |
+            type=raw,value=0.1.${{ github.run_number }}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.APP_DIR }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Keep the tag's manifest list clean (no unknown/unknown attestation
+          # entries) so the Octopus feed lists exactly the arch variants.
+          provenance: false

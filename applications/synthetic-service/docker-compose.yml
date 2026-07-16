@@ -1,0 +1,97 @@
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      checkout-prod:
+        condition: service_healthy
+      checkout-staging:
+        condition: service_healthy
+      payments-prod-acme:
+        condition: service_healthy
+      payments-prod-globex:
+        condition: service_healthy
+      payments-staging:
+        condition: service_healthy
+
+  checkout-prod: # Healthy
+    build: .
+    ports:
+      - "8081:8080"
+    environment:
+      APP_PROJECT: checkout
+      APP_ENVIRONMENT: production
+      APP_ERROR_RATE: "0.002"
+    healthcheck:
+      test: ["CMD", "/synthetic-service", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
+  checkout-staging: # Degraded
+    build: .
+    ports:
+      - "8082:8080"
+    environment:
+      APP_PROJECT: checkout
+      APP_ENVIRONMENT: staging
+      APP_ERROR_RATE: "0.03"
+    healthcheck:
+      test: ["CMD", "/synthetic-service", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
+  payments-prod-acme: # Healthy + tenant
+    build: .
+    ports:
+      - "8083:8080"
+    environment:
+      APP_PROJECT: payments
+      APP_ENVIRONMENT: production
+      APP_TENANT: acme
+      APP_ERROR_RATE: "0.002"
+    healthcheck:
+      test: ["CMD", "/synthetic-service", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
+  payments-prod-globex: # Unhealthy
+    build: .
+    ports:
+      - "8084:8080"
+    environment:
+      APP_PROJECT: payments
+      APP_ENVIRONMENT: production
+      APP_TENANT: globex
+      APP_ERROR_RATE: "0.10"
+    healthcheck:
+      test: ["CMD", "/synthetic-service", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+
+  payments-staging: # Unknown
+    build: .
+    ports:
+      - "8085:8080"
+    environment:
+      APP_PROJECT: payments
+      APP_ENVIRONMENT: staging
+      APP_MODE: absent
+    healthcheck:
+      test: ["CMD", "/synthetic-service", "-healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s

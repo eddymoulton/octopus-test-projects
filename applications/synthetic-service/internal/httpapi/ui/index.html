@@ -1,0 +1,322 @@
+<title>Synthetic Service</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14161a;
+    --panel: #1c1f26;
+    --border: #2c3038;
+    --text: #e6e8eb;
+    --muted: #8b92a0;
+    --accent: #4f8cff;
+    --good: #3ecf8e;
+    --bad: #e5534b;
+    --warn: #e5a33b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 1.1rem; margin: 0 0 1.25rem; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; max-width: 960px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+  }
+  .card h2 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 0.75rem;
+  }
+  dl.identity { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 1rem; margin: 0; }
+  dl.identity dt { color: var(--muted); }
+  dl.identity dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .stat-row { display: flex; justify-content: space-between; padding: 0.3rem 0; border-bottom: 1px dashed var(--border); }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-row span:first-child { color: var(--muted); }
+  .stat-row span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .mode-badge {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+  .mode-normal { background: rgba(62, 207, 142, 0.15); color: var(--good); }
+  .mode-absent { background: rgba(229, 163, 59, 0.15); color: var(--warn); }
+  .mode-down   { background: rgba(229, 83, 75, 0.15); color: var(--bad); }
+  form.knobs { display: grid; grid-template-columns: 1fr; gap: 0.6rem; }
+  .field { display: grid; grid-template-columns: 1fr; gap: 0.25rem; }
+  .field label { color: var(--muted); font-size: 0.8rem; }
+  .field input, .field select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 0.4rem 0.5rem;
+    font: inherit;
+  }
+  .field input:focus, .field select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .actions { display: flex; gap: 0.6rem; margin-top: 0.5rem; grid-column: 1 / -1; }
+  button {
+    background: var(--accent);
+    color: #0b0d10;
+    border: none;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.secondary { background: var(--border); color: var(--text); }
+  button:active { transform: translateY(1px); }
+  #applyStatus { color: var(--muted); font-size: 0.8rem; margin-top: 0.4rem; grid-column: 1 / -1; min-height: 1.2em; }
+</style>
+
+<h1>SYNTHETIC SERVICE</h1>
+<div class="grid">
+  <div class="card">
+    <h2>Identity</h2>
+    <dl class="identity">
+      <dt>Service</dt><dd id="idService">&mdash;</dd>
+      <dt>Environment</dt><dd id="idEnv">&mdash;</dd>
+      <dt>Tenant</dt><dd id="idTenant">&mdash;</dd>
+      <dt>Release</dt><dd id="idRelease">&mdash;</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Live status</h2>
+    <div class="stat-row"><span>Mode</span><span id="statMode"><span class="mode-badge">&mdash;</span></span></div>
+    <div class="stat-row"><span>Effective RPS</span><span id="statRPS">&mdash;</span></div>
+    <div class="stat-row"><span>Ramp progress</span><span id="statRamp">&mdash;</span></div>
+    <div class="stat-row"><span>Observed success rate</span><span id="statSuccess">&mdash;</span></div>
+  </div>
+
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>Knobs</h2>
+    <form class="knobs" id="knobsForm" onsubmit="return false;">
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.6rem 1rem;">
+        <div class="field">
+          <label for="maxRps">Max RPS</label>
+          <input type="number" id="maxRps" step="any" min="0">
+        </div>
+        <div class="field">
+          <label for="rampSeconds">Ramp seconds</label>
+          <input type="number" id="rampSeconds" step="any" min="0">
+        </div>
+        <div class="field">
+          <label for="errorRate">Error rate (0&ndash;1)</label>
+          <input type="number" id="errorRate" step="any" min="0" max="1">
+        </div>
+        <div class="field">
+          <label for="latencyMean">Latency mean (ms)</label>
+          <input type="number" id="latencyMean" step="any" min="0">
+        </div>
+        <div class="field">
+          <label for="latencyJitter">Latency jitter (ms)</label>
+          <input type="number" id="latencyJitter" step="any" min="0">
+        </div>
+        <div class="field">
+          <label for="successWindow">Success window (s)</label>
+          <input type="number" id="successWindow" step="1" min="1">
+        </div>
+        <div class="field">
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="normal">normal</option>
+            <option value="absent">absent</option>
+            <option value="down">down</option>
+          </select>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="applyBtn" type="button">Apply</button>
+        <button id="restartBtn" type="button" class="secondary">Restart ramp</button>
+      </div>
+      <div id="applyStatus"></div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // Fields shared between the knobs form and the SettingsPatch JSON body.
+  // key: input element id, patch: JSON field name, kind: number parser.
+  var FIELDS = [
+    { id: "maxRps",        patch: "max_rps",                kind: "float" },
+    { id: "rampSeconds",   patch: "ramp_seconds",            kind: "float" },
+    { id: "errorRate",     patch: "error_rate",              kind: "float" },
+    { id: "latencyMean",   patch: "latency_mean_ms",         kind: "float" },
+    { id: "latencyJitter", patch: "latency_jitter_ms",       kind: "float" },
+    { id: "successWindow", patch: "success_window_seconds",  kind: "int" },
+    { id: "mode",          patch: "mode",                    kind: "string" }
+  ];
+
+  // Last settings snapshot received from the server, used both to populate
+  // inputs and to diff against on Apply (so we only send changed fields).
+  var lastSettings = null;
+
+  function el(id) { return document.getElementById(id); }
+
+  function parseField(field) {
+    var raw = el(field.id).value;
+    if (field.kind === "float") return parseFloat(raw);
+    if (field.kind === "int") return parseInt(raw, 10);
+    return raw;
+  }
+
+  function fieldsEqual(a, b) {
+    return a === b;
+  }
+
+  // Human-readable label for a field, used in validation messages.
+  function fieldLabel(field) {
+    var label = document.querySelector('label[for="' + field.id + '"]');
+    return label ? label.textContent : field.id;
+  }
+
+  // Visually flags an input as holding an unparsable value.
+  function markFieldInvalid(field, invalid) {
+    el(field.id).style.outline = invalid ? "1px solid var(--bad)" : "";
+  }
+
+  // Populate an input from server state, but never while the user has it
+  // focused -- otherwise the 1s poll would clobber in-progress typing.
+  function setFieldIfIdle(field, value) {
+    var input = el(field.id);
+    if (document.activeElement === input) return;
+    input.value = value;
+  }
+
+  function renderIdentity(identity) {
+    el("idService").textContent = identity.service || "—";
+    el("idEnv").textContent = identity.env || "—";
+    el("idTenant").textContent = identity.tenant || "—";
+    el("idRelease").textContent = identity.release || "—";
+  }
+
+  function renderStatus(state) {
+    var mode = state.settings.mode;
+    var badge = document.createElement("span");
+    badge.className = "mode-badge mode-" + mode;
+    badge.textContent = mode;
+    var modeCell = el("statMode");
+    modeCell.innerHTML = "";
+    modeCell.appendChild(badge);
+
+    el("statRPS").textContent = state.effective_rps.toFixed(2);
+    el("statRamp").textContent = (state.ramp_progress * 100).toFixed(0) + "%";
+    el("statSuccess").textContent = (state.observed_success_rate * 100).toFixed(2) + "%";
+  }
+
+  function renderKnobs(settings) {
+    FIELDS.forEach(function (field) {
+      // The mode <select> isn't subject to the same in-progress-typing
+      // hazard as the number inputs, but we still shouldn't clobber a
+      // value the user is mid-way through choosing.
+      if (field.id === "mode") {
+        if (document.activeElement !== el("mode")) {
+          el("mode").value = settings.mode;
+        }
+        return;
+      }
+      setFieldIfIdle(field, settings[field.patch]);
+    });
+  }
+
+  function render(state) {
+    renderIdentity(state.identity);
+    renderStatus(state);
+    renderKnobs(state.settings);
+    lastSettings = state.settings;
+  }
+
+  function fetchState() {
+    fetch("/api/state")
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function (err) { console.error("state poll failed", err); });
+  }
+
+  function applyPatch() {
+    var status = el("applyStatus");
+
+    // Nothing to diff against yet -- the first GET /api/state hasn't
+    // resolved, so every input (notably the mode <select>) is still just
+    // showing its unpopulated HTML default rather than this instance's
+    // real settings. Sending a patch now would silently revert fields the
+    // user never touched (e.g. mode back to "normal").
+    if (!lastSettings) {
+      status.textContent = "Still loading current settings, try again in a moment.";
+      return;
+    }
+
+    var patch = {};
+    var invalidFields = [];
+
+    FIELDS.forEach(function (field) {
+      markFieldInvalid(field, false);
+
+      var value = parseField(field);
+      if (typeof value === "number" && isNaN(value)) {
+        invalidFields.push(field);
+        markFieldInvalid(field, true);
+        return;
+      }
+      if (fieldsEqual(value, lastSettings[field.patch])) return;
+      patch[field.patch] = value;
+    });
+
+    if (invalidFields.length > 0) {
+      status.textContent = "Not applied: invalid value for " +
+        invalidFields.map(fieldLabel).join(", ") + ".";
+      return;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      status.textContent = "No changes to apply.";
+      return;
+    }
+
+    fetch("/api/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch)
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error("apply failed: " + r.status);
+        return r.json();
+      })
+      .then(function (state) {
+        render(state);
+        status.textContent = "Applied at " + new Date().toLocaleTimeString() + ".";
+      })
+      .catch(function (err) {
+        status.textContent = String(err);
+      });
+  }
+
+  function restartRamp() {
+    fetch("/api/ramp/restart", { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function (err) { console.error("restart failed", err); });
+  }
+
+  el("applyBtn").addEventListener("click", applyPatch);
+  el("restartBtn").addEventListener("click", restartRamp);
+
+  fetchState();
+  setInterval(fetchState, 1000);
+})();
+</script>

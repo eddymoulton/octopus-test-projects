@@ -1,0 +1,11 @@
+.git
+README.md
+*.md
+prometheus/
+docker-compose.yml
+Dockerfile
+.gitignore
+synthetic-service
+*.exe
+*.test
+*.out
