@@ -113,8 +113,8 @@
           <input type="number" id="rampSeconds" step="any" min="0">
         </div>
         <div class="field">
-          <label for="errorRate">Error rate (0&ndash;1)</label>
-          <input type="number" id="errorRate" step="any" min="0" max="1">
+          <label for="errorRate">Error rate (%)</label>
+          <input type="number" id="errorRate" step="any" min="0" max="100">
         </div>
         <div class="field">
           <label for="latencyMean">Latency mean (ms)</label>
@@ -151,11 +151,13 @@
   "use strict";
 
   // Fields shared between the knobs form and the SettingsPatch JSON body.
-  // key: input element id, patch: JSON field name, kind: number parser.
+  // id: input element id, patch: JSON field name, kind: number parser,
+  // scale: optional display-per-wire factor for fields shown in another unit
+  // (error rate is a fraction on the wire but entered as a percentage).
   var FIELDS = [
     { id: "maxRps",        patch: "max_rps",                kind: "float" },
     { id: "rampSeconds",   patch: "ramp_seconds",            kind: "float" },
-    { id: "errorRate",     patch: "error_rate",              kind: "float" },
+    { id: "errorRate",     patch: "error_rate",              kind: "float", scale: 100 },
     { id: "latencyMean",   patch: "latency_mean_ms",         kind: "float" },
     { id: "latencyJitter", patch: "latency_jitter_ms",       kind: "float" },
     { id: "successWindow", patch: "success_window_seconds",  kind: "int" },
@@ -168,10 +170,25 @@
 
   function el(id) { return document.getElementById(id); }
 
+  // Convert between the wire value (what the API carries) and the shown value
+  // (what the input displays). The rounding sheds binary-float noise so a
+  // scaled value lands on a clean decimal (0.1 * 100 would be 10.0000...2).
+  function toShown(field, wire) {
+    if (!field.scale) return wire;
+    return Number((wire * field.scale).toFixed(10));
+  }
+
+  function toWire(field, shown) {
+    if (!field.scale) return shown;
+    return Number((shown / field.scale).toFixed(10));
+  }
+
+  // parseField returns the wire value, converting from the shown unit so the
+  // diff, dirty check, and patch body all speak the API's units.
   function parseField(field) {
     var raw = el(field.id).value;
-    if (field.kind === "float") return parseFloat(raw);
-    if (field.kind === "int") return parseInt(raw, 10);
+    if (field.kind === "float") return toWire(field, parseFloat(raw));
+    if (field.kind === "int") return toWire(field, parseInt(raw, 10));
     return raw;
   }
 
@@ -190,12 +207,22 @@
     el(field.id).style.outline = invalid ? "1px solid var(--bad)" : "";
   }
 
-  // Populate an input from server state, but never while the user has it
-  // focused -- otherwise the 1s poll would clobber in-progress typing.
+  // A field is "dirty" when its input no longer matches the last settings the
+  // server sent. renderKnobs runs before render() refreshes lastSettings, so
+  // lastSettings still holds the previous server snapshot at this point.
+  function fieldIsDirty(field) {
+    if (!lastSettings) return false;
+    return !fieldsEqual(parseField(field), lastSettings[field.patch]);
+  }
+
+  // Populate an input from server state, but leave the user's own editing
+  // alone: skip a field that is focused, or that holds an edit not yet applied.
+  // The poll only fills in fields the user isn't currently changing.
   function setFieldIfIdle(field, value) {
     var input = el(field.id);
     if (document.activeElement === input) return;
-    input.value = value;
+    if (fieldIsDirty(field)) return;
+    input.value = toShown(field, value);
   }
 
   function renderIdentity(identity) {
@@ -219,17 +246,10 @@
     el("statSuccess").textContent = (state.observed_success_rate * 100).toFixed(2) + "%";
   }
 
+  // The focus/dirty guards in setFieldIfIdle apply to a <select> as well, so
+  // the mode field goes through the same path as the number inputs.
   function renderKnobs(settings) {
     FIELDS.forEach(function (field) {
-      // The mode <select> isn't subject to the same in-progress-typing
-      // hazard as the number inputs, but we still shouldn't clobber a
-      // value the user is mid-way through choosing.
-      if (field.id === "mode") {
-        if (document.activeElement !== el("mode")) {
-          el("mode").value = settings.mode;
-        }
-        return;
-      }
       setFieldIfIdle(field, settings[field.patch]);
     });
   }
