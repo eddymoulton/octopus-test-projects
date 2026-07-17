@@ -12,7 +12,7 @@ resource "octopusdeploy_kubernetes_agent_deployment_target" "main" {
   environments = [octopusdeploy_environment.staging.id, octopusdeploy_environment.production.id]
   roles        = ["live-status"]
 
-  # One agent serves untenanted (checkout, infra) and tenanted (payments)
+  # One agent serves untenanted (checkout) and tenanted (payments)
   # deployments; connect the payments tenants so they have a target to deploy to.
   tenanted_deployment_participation = "TenantedOrUntenanted"
   tenants                           = [octopusdeploy_tenant.acme.id, octopusdeploy_tenant.globex.id]

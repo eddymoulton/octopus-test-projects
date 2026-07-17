@@ -13,8 +13,12 @@ deployment processes as modules under `../deployment_processes/`).
 - Kubernetes agent (`Live Status Agent`, role `live-status`) installed by Helm into the cluster. The
   `kubernetesMonitor` is not installed (that's the k8s live-object monitor, separate from the Prometheus
   app-monitoring exercised here).
-- Infrastructure project → `../deployment_processes/prometheus_process`: deploys Prometheus (namespace
-  `live-status-monitoring`, RBAC, annotation-based pod scraping, Service) into the cluster.
+- Prometheus (namespace `live-status-monitoring`), deployed by Terraform via the
+  `prometheus-community/prometheus` Helm chart (`prometheus.tf`) — server only, annotation-based pod
+  scraping, Service `prometheus:9090`, and an Ingress at `http://prometheus.localhost`. Comes up at
+  `terraform apply` (no Octopus project involved). Migrating a cluster that already has an
+  Octopus-deployed Prometheus in this namespace? Delete it first (`kubectl delete ns live-status-monitoring`)
+  so Terraform doesn't collide with the existing resources.
 - checkout (untenanted) and payments (tenanted: `acme`, `globex`) projects →
   `../deployment_processes/synthetic_service_process`: deploy the app. Project name = the `service` label.
   A prompted Variant (Good/Bad) drives `App.ErrorRate`; `Octopus.Release.Number` → the `release`
@@ -46,12 +50,13 @@ deployment processes as modules under `../deployment_processes/`).
 ```
 cd live-status
 terraform init
-terraform apply            # creates space, agent (helm), infra + test projects
+terraform apply            # creates space, agent + prometheus (helm), test projects
 # wait for the "Live Status Agent" target to go healthy in Octopus
 ```
 
-1. Infra: create a release of Infrastructure and deploy Staging → Production. Prometheus comes up.
-   `kubectl -n live-status-monitoring port-forward svc/prometheus 9090:9090` → http://localhost:9090
+1. Prometheus is already up — Terraform deploys it at `terraform apply`. View it at
+   `http://prometheus.localhost`, or `kubectl -n live-status-monitoring port-forward svc/prometheus 9090:9090`
+   → http://localhost:9090
 2. Baseline good: release payments, pick the image tag, deploy to Production for `acme` (and
    `globex`) with Variant=Good. Repeat checkout → Production. Confirm pods:
    `kubectl -n live-status-production get pods`.
@@ -61,6 +66,44 @@ terraform apply            # creates space, agent (helm), infra + test projects
    pod (new `release`, error rate 0.10); success rate drops < 0.95 within a scrape or two. That's the
    deployment-correlated regression.
 5. Roll forward: new release, Variant=Good → recovers.
+
+## Optional: mirror metrics to Datadog
+
+The app's metrics (`app_request_success_rate`, `app_requests_total`, latency
+histograms, etc.) go to Prometheus by default. To **also** send them to Datadog,
+provide a Datadog API key — nothing else changes, and the metrics keep flowing to
+Prometheus too.
+
+Add to `live-status/variables.auto.tfvars` (gitignored, so the key stays out of
+git):
+
+```hcl
+datadog_api_key = "…"             # a Datadog API key (not an APP key)
+datadog_site    = "datadoghq.com" # optional; your DD site, e.g. us5.datadoghq.com, datadoghq.eu
+```
+
+On the next `terraform apply`, a Datadog Agent (Helm chart `datadog/datadog`) is
+deployed into a `datadog-<workspace>` namespace. It uses Datadog's Prometheus
+autodiscovery to scrape the same `prometheus.io/scrape` pods Prometheus already
+scrapes, so Datadog collects the same `app_*` metrics (counts, latency, success
+rate), tagged by `service` / `env` / `tenant` / `release`. Datadog's OpenMetrics
+check may name or shape some series (notably histograms) differently from
+Prometheus's raw output. The Agent runs a lean, metrics-only profile (no APM,
+logs, process-agent, orchestrator explorer, or cluster agent).
+
+**It is fully optional.** Leave `datadog_api_key` empty (the default) and no
+Datadog resources are created — `terraform plan` is identical to the
+Prometheus-only setup.
+
+Confirm it after apply:
+
+```
+kubectl -n datadog-<workspace> get pods      # the datadog agent pod(s) are Running
+```
+
+Then check the metrics land in Datadog (Metrics Explorer → `app_request_success_rate`,
+filtered by the `service`/`env` tags). The Agent needs outbound network access to
+your Datadog site.
 
 ## Accessing the app UIs
 

@@ -62,7 +62,7 @@ resource "octopusdeploy_lifecycle" "main" {
 
 resource "octopusdeploy_project_group" "main" {
   name        = "Live Application Status"
-  description = "Infra + synthetic-service projects"
+  description = "Synthetic-service projects"
   space_id    = octopusdeploy_space.main.id
 }
 

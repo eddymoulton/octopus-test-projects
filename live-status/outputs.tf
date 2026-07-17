@@ -7,6 +7,6 @@ output "space_name" {
 }
 
 output "prometheus_ui_hint" {
-  description = "Once the Infrastructure project has been deployed, port-forward the Prometheus UI."
-  value       = "kubectl -n live-status-monitoring port-forward svc/prometheus 9090:9090   # then open http://localhost:9090"
+  description = "Prometheus is deployed by Terraform (prometheus.tf) and comes up at apply. Reach the UI via the Ingress or a port-forward."
+  value       = "http://prometheus.localhost   (or: kubectl -n live-status-monitoring port-forward svc/prometheus 9090:9090 then http://localhost:9090)"
 }
