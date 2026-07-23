@@ -12,6 +12,11 @@
 # 9090, so existing `svc/prometheus 9090` port-forwards and the
 # http://prometheus.localhost Ingress keep working.
 
+locals {
+  # Shared base query for the success-rate alert tiers.
+  success_rate_20s = "avg by (service, env, tenant) (avg_over_time(app_request_success_rate[20s]))"
+}
+
 resource "kubernetes_namespace_v1" "monitoring" {
   metadata {
     name = "live-status-monitoring"
@@ -95,5 +100,77 @@ resource "helm_release" "prometheus" {
       name  = "server.ingress.hosts"
       value = ["prometheus.localhost"]
     },
+  ]
+
+  # Alerting rules, rendered by the chart to /etc/config/alerting_rules.yml.
+  # Passed as a values doc, not `set`, so the expressions aren't split on
+  # spaces and operators.
+  values = [
+    yamlencode({
+      serverFiles = {
+        "alerting_rules.yml" = {
+          groups = [
+            {
+              name = "live-status"
+              rules = [
+                # app_up is only ever 1, so this trips only on partial scrape gaps.
+                {
+                  alert = "AppUpDegraded"
+                  expr  = "avg by (service, env, tenant) (avg_over_time(app_up[20s])) < 1"
+                  "for" = "1m"
+                  labels = {
+                    severity = "warning"
+                  }
+                  annotations = {
+                    summary     = "app_up degraded for {{ $labels.service }}/{{ $labels.env }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
+                    description = "20s-averaged app_up is {{ $value }} (< 1) for service={{ $labels.service }} env={{ $labels.env }} tenant={{ $labels.tenant }}."
+                  }
+                },
+                # Warning band [0.8, 0.95); the >= 0.8 bound keeps it exclusive
+                # from the critical tier.
+                {
+                  alert = "AppSuccessRateLow"
+                  expr  = "${local.success_rate_20s} < 0.95 >= 0.8"
+                  "for" = "1m"
+                  labels = {
+                    severity = "warning"
+                  }
+                  annotations = {
+                    summary     = "Success rate low for {{ $labels.service }}/{{ $labels.env }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
+                    description = "20s-averaged app_request_success_rate is {{ $value }} (in [0.8, 0.95)) for service={{ $labels.service }} env={{ $labels.env }} tenant={{ $labels.tenant }}."
+                  }
+                },
+                {
+                  alert = "AppSuccessRateCritical"
+                  expr  = "${local.success_rate_20s} < 0.8"
+                  "for" = "1m"
+                  labels = {
+                    severity = "critical"
+                  }
+                  annotations = {
+                    summary     = "Success rate critical for {{ $labels.service }}/{{ $labels.env }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
+                    description = "20s-averaged app_request_success_rate is {{ $value }} (< 0.8) for service={{ $labels.service }} env={{ $labels.env }} tenant={{ $labels.tenant }}."
+                  }
+                },
+                # A hard-down pod stops emitting app_up, so catch a full outage
+                # via the scrape-level `up`.
+                {
+                  alert = "AppTargetDown"
+                  expr  = "up{job=\"kubernetes-pods\"} == 0"
+                  "for" = "1m"
+                  labels = {
+                    severity = "critical"
+                  }
+                  annotations = {
+                    summary     = "Scrape target down: {{ $labels.namespace }}/{{ $labels.pod }}"
+                    description = "Prometheus target {{ $labels.instance }} (pod {{ $labels.pod }}) has up == 0 for over 1m; app_up is absent while it is down."
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    })
   ]
 }
