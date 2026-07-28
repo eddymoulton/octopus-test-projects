@@ -19,6 +19,19 @@ locals {
   # API key the Agent uses. Gated separately so an API-key-only setup still
   # gets the Agent (metrics flow, no monitors) rather than failing the plan.
   datadog_monitors_enabled = local.datadog_enabled && var.datadog_app_key != ""
+
+  # Webhooks are org-global in Datadog, not scoped to a cluster or a space, and
+  # the name is the addressing key the monitor uses (@webhook-<name>) — so it
+  # carries the owner as well as the workspace. Two teammates sharing a name
+  # would silently repoint each other's alerts at the wrong tunnel. The handle
+  # is built from the same local rather than from the resource, so the monitor's
+  # message doesn't depend on the webhook's computed attributes.
+  datadog_webhook_enabled = local.datadog_monitors_enabled && var.datadog_webhook_url != ""
+  datadog_webhook_name    = "octopus-live-status-health-${var.owner}-${replace(terraform.workspace, ".", "-")}"
+  # nonsensitive() because the enable flag derives from the (sensitive) key
+  # variables, and without it that taint spreads into the monitor's message and
+  # redacts the whole thing in plan output. The handle is only a name.
+  datadog_webhook_handle = nonsensitive(local.datadog_webhook_enabled) ? "@webhook-${local.datadog_webhook_name}" : ""
 }
 
 resource "kubernetes_namespace_v1" "datadog" {
@@ -46,8 +59,11 @@ resource "helm_release" "datadog" {
       value = var.datadog_site
     },
     {
-      name  = "datadog.clusterName"
-      value = "live-status-${replace(terraform.workspace, ".", "-")}"
+      name = "datadog.clusterName"
+      # Owner-scoped too: teammates share a Datadog org, and two clusters with
+      # the same name make Datadog's Kubernetes views ambiguous even though the
+      # owner tag below is what the monitor actually filters on.
+      value = "live-status-${var.owner}-${replace(terraform.workspace, ".", "-")}"
     },
     # Reuse the pods' prometheus.io/* annotations; collects all exposed metrics.
     {
@@ -84,6 +100,17 @@ resource "helm_release" "datadog" {
     },
   ]
 
+  # Global tag stamped on every metric this Agent ships. This is what makes a
+  # shared Datadog org workable: without it every teammate's app_* series are
+  # indistinguishable, and a monitor querying {*} alerts on everyone's pods.
+  # set_list rather than set because datadog.tags is a list.
+  set_list = [
+    {
+      name  = "datadog.tags"
+      value = ["owner:${var.owner}"]
+    },
+  ]
+
   set_sensitive = [
     {
       name  = "datadog.apiKey"
@@ -93,8 +120,38 @@ resource "helm_release" "datadog" {
 }
 
 # --------------------------------------------------------------------------
-# Monitors — the Datadog counterpart to the alerting_rules.yml in prometheus.tf.
+# Monitors and notifications — the Datadog counterpart to the
+# alerting_rules.yml / alertmanager route in prometheus.tf.
 # --------------------------------------------------------------------------
+
+# Datadog POSTs here from its own servers, so unlike the Alertmanager webhook
+# (which posts from inside the cluster to host.lima.internal) this URL has to be
+# publicly reachable — a tunnel, for a local rig.
+#
+# There is no per-tag variable available in a webhook payload, so the group
+# identity travels as $ALERT_SCOPE, which for this monitor's grouping renders
+# like "service:payments,env:production,kube_deployment:payments-production-globex".
+resource "datadog_webhook" "health_events" {
+  count = local.datadog_webhook_enabled ? 1 : 0
+
+  name      = local.datadog_webhook_name
+  url       = var.datadog_webhook_url
+  encode_as = "json"
+
+  payload = jsonencode({
+    alert_id = "$ALERT_ID"
+    title    = "$ALERT_TITLE"
+    # Triggered | Warn | Recovered | No Data | Renotify — the actual health
+    # event, as distinct from the current status.
+    transition = "$ALERT_TRANSITION"
+    status     = "$ALERT_STATUS"
+    priority   = "$ALERT_PRIORITY"
+    scope      = "$ALERT_SCOPE"
+    tags       = "$TAGS"
+    link       = "$LINK"
+    date       = "$DATE"
+  })
+}
 
 # Mirrors the AppSuccessRateLow / AppSuccessRateCritical pair as one monitor:
 # Datadog escalates warning -> critical on its own, so it needs no equivalent of
@@ -110,12 +167,16 @@ resource "helm_release" "datadog" {
 resource "datadog_monitor" "app_success_rate" {
   count = local.datadog_monitors_enabled ? 1 : 0
 
-  name = "[live-status ${terraform.workspace}] Synthetic app success rate"
+  name = "[live-status ${var.owner}/${terraform.workspace}] Synthetic app success rate"
   type = "query alert"
 
   # last_1m carries both roles the PromQL rules split between avg_over_time[20s]
   # and `for: 1m` — Datadog has no separate sustain duration, the window is it.
-  query = "avg(last_1m):avg:app_request_success_rate{*} by {service,env,kube_deployment} < 0.8"
+  #
+  # Scoped to {owner:…}, not {*}: teammates share the Datadog org and all ship
+  # identically-tagged app_* series, so an unscoped query alerts on everyone's
+  # instances. The tag comes from the Agent's datadog.tags above.
+  query = "avg(last_1m):avg:app_request_success_rate{owner:${var.owner}} by {service,env,kube_deployment} < 0.8"
 
   monitor_thresholds {
     warning  = 0.95
@@ -127,7 +188,15 @@ resource "datadog_monitor" "app_success_rate" {
     {{#is_warning}}Success rate low for {{service.name}}/{{env.name}} ({{kube_deployment.name}}): 1m-averaged app_request_success_rate is {{value}} (in [0.8, 0.95)).{{/is_warning}}
     {{#is_no_data}}No success-rate data for {{kube_deployment.name}} — the instance is in absent/down mode or its pod is gone. This is the Unknown state, which is distinct from Unhealthy.{{/is_no_data}}
     {{#is_recovery}}Success rate recovered for {{service.name}}/{{env.name}} ({{kube_deployment.name}}): now {{value}}.{{/is_recovery}}
+
+    ${local.datadog_webhook_handle}
   EOT
+
+  # The handle above is deliberately outside every {{#is_*}} block. A handle
+  # nested in one only fires for that state; at the top level it fires on every
+  # transition the monitor notifies about — triggered, warning, recovery, and
+  # (because notify_no_data is on) no data.
+  depends_on = [datadog_webhook.health_events]
 
   # The app's absent/down modes stop app_request_success_rate entirely, which is
   # the connector's first-class Unknown state rather than a failure — so it gets
@@ -145,6 +214,7 @@ resource "datadog_monitor" "app_success_rate" {
   tags = [
     "managed-by:terraform",
     "app:synthetic-service",
+    "owner:${var.owner}",
     "workspace:${terraform.workspace}",
   ]
 }

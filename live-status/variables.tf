@@ -1,3 +1,25 @@
+# --------------------------------------------------------------------------
+# Who is running this copy of the rig.
+#
+# Deliberately has NO default. Everything else here is per-machine and can't
+# collide, but a shared Datadog org is one namespace for everybody: metrics,
+# monitors and webhooks from every teammate land in the same place. This value
+# is the discriminator that keeps them apart, so an unset owner has to fail the
+# plan rather than quietly inherit someone else's identity.
+# --------------------------------------------------------------------------
+
+variable "owner" {
+  type        = string
+  description = "Short identifier for whoever is running this rig (e.g. your username). Keeps Datadog metrics, monitors and webhooks distinct in a Datadog org shared with teammates."
+
+  validation {
+    # Has to be safe as both a Datadog tag value and a webhook name, and
+    # lowercase because Datadog lowercases tags anyway.
+    condition     = can(regex("^[a-z0-9][a-z0-9-]*$", var.owner))
+    error_message = "owner must be lowercase alphanumeric with dashes, starting with a letter or digit (e.g. \"eddy\" or \"eddy-m\")."
+  }
+}
+
 variable "octopus_api_key" {
   type      = string
   sensitive = true
@@ -62,6 +84,17 @@ variable "datadog_app_key" {
   sensitive   = true
   description = "Datadog APP key, required only to manage monitors (the Agent doesn't need one). Empty (default) = deploy the Agent but create no monitors."
   default     = ""
+}
+
+variable "datadog_webhook_url" {
+  type        = string
+  description = "External URL Datadog POSTs monitor health events to. Must be reachable from Datadog's servers, not just the local machine — hence a tunnel. Empty (default) = create no webhook and leave the monitor notifying nothing. No shared default on purpose: a committed URL would point every teammate's alerts at one person's tunnel."
+  default     = ""
+
+  validation {
+    condition     = var.datadog_webhook_url == "" || startswith(var.datadog_webhook_url, "https://") || startswith(var.datadog_webhook_url, "http://")
+    error_message = "datadog_webhook_url must be empty or an http(s) URL."
+  }
 }
 
 variable "datadog_site" {

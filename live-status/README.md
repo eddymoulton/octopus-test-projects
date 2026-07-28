@@ -30,6 +30,16 @@ deployment processes as modules under `../deployment_processes/`).
 
 ## Before `terraform apply`: resolve with Eddy
 
+0. **`owner` is required and has no default.** Set it in `live-status/variables.auto.tfvars`:
+
+   ```hcl
+   owner = "eddy"   # lowercase, alphanumeric + dashes
+   ```
+
+   Everything else in this rig is per-machine and can't collide, but a Datadog org is shared:
+   metrics, monitors and webhooks from every teammate land in one namespace. `owner` is the
+   discriminator. It has no default deliberately — `terraform plan` fails with "No value for
+   required variable" rather than silently adopting someone else's identity.
 1. App image (GHCR): the image is published to `ghcr.io/eddymoulton/synthetic-service` by the workflow.
    `app_feed_uri` and `app_image_package` default to the GHCR values, but you must give Octopus a GitHub token
    so the Docker feed can list image tags. Add it to `live-status/variables.auto.tfvars` (gitignored, so the
@@ -159,9 +169,10 @@ Add to `live-status/variables.auto.tfvars` (gitignored, so the key stays out of
 git):
 
 ```hcl
-datadog_api_key = "…"             # a Datadog API key
-datadog_app_key = "…"             # optional; only needed to create monitors (see below)
-datadog_site    = "datadoghq.com" # optional; your DD site, e.g. us5.datadoghq.com, datadoghq.eu
+datadog_api_key     = "…"             # a Datadog API key
+datadog_app_key     = "…"             # optional; only needed to create monitors (see below)
+datadog_site        = "datadoghq.com" # optional; your DD site, e.g. us5.datadoghq.com, datadoghq.eu
+datadog_webhook_url = "https://….trycloudflare.com"  # optional; see "Datadog webhook"
 ```
 
 On the next `terraform apply`, a Datadog Agent (Helm chart `datadog/datadog`) is
@@ -200,7 +211,7 @@ entirely, so a keyless `terraform plan` stays clean.
 itself, so it needs no equivalent of the PromQL `< 0.95 >= 0.8` band:
 
 ```
-avg(last_1m):avg:app_request_success_rate{*} by {service,env,kube_deployment} < 0.8
+avg(last_1m):avg:app_request_success_rate{owner:<owner>} by {service,env,kube_deployment} < 0.8
 ```
 
 with `warning = 0.95`, `critical = 0.8`, and `notify_no_data` after 10m to surface the
@@ -217,9 +228,66 @@ Two deliberate divergences from the PromQL:
   coverage while keeping tenants apart — its value already encodes the tenant
   (`payments-production-globex`).
 
-The monitor watches `{*}`. If you ever run two workspaces against the same Datadog
-account, scope it with the Agent's cluster tag
-(`kube_cluster_name:live-status-<workspace>`) so the two don't overlap.
+### Sharing a Datadog org with teammates
+
+A Datadog org is one namespace for everyone, so `var.owner` scopes four things:
+
+| | Value |
+|---|---|
+| Agent global tag | `owner:<owner>` on every metric shipped (`datadog.tags`) |
+| Monitor query | `{owner:<owner>}` rather than `{*}` |
+| Monitor name + tags | `[live-status <owner>/<workspace>] …`, `owner:<owner>` |
+| Webhook name | `octopus-live-status-health-<owner>-<workspace>` |
+| Cluster name | `live-status-<owner>-<workspace>` |
+
+The query scope is the one that matters most. Every teammate's Agent ships
+`app_request_success_rate` with identical `service`/`env`/`kube_deployment` tags, so an
+unscoped `{*}` monitor alerts on *everyone's* pods. Renaming monitors doesn't fix that —
+the data needs the discriminator.
+
+The webhook name is the sharpest. `@webhook-<name>` is an org-wide addressing key, and
+each teammate's tunnel URL is different, so two people sharing a name would silently
+repoint each other's alerts. Separate Terraform states mean neither sees drift.
+
+Two caveats: the `owner` tag only lands on metrics ingested *after* the Agent restarts,
+so there's a window where older series are unscoped and won't match the monitor. And
+`source:local-test` (set by the app itself) separates synthetic from real data, not one
+person's from another's.
+
+If you don't need Datadog at all, leave `datadog_api_key` empty — the Prometheus and
+Alertmanager path is entirely local and has no shared surface to collide on.
+
+### Datadog webhook
+
+`datadog_webhook.health_events` POSTs every health event to `var.datadog_webhook_url`,
+which is **empty by default** — a committed URL would point every teammate's alerts at
+one person's tunnel. It's a third gate on top of the APP key: blank the URL and no
+webhook is created.
+
+Unlike the Alertmanager webhook, **Datadog calls from its own servers**, so this URL
+has to be publicly reachable; `host.lima.internal` or `localhost` won't do.
+
+The monitor references it as `@webhook-<name>` placed *outside* every `{{#is_*}}`
+block — a handle nested inside one only fires for that state, whereas at the top level
+it fires on every transition the monitor notifies about: triggered, warning, recovery,
+and no data. The webhook name carries the workspace because Datadog webhooks are
+org-global.
+
+The payload is JSON. There's no per-tag variable available in a webhook payload, so the
+group identity arrives as `$ALERT_SCOPE`:
+
+```json
+{
+  "alert_id": "...", "title": "...",
+  "transition": "Triggered",
+  "status": "...", "priority": "...",
+  "scope": "service:payments,env:production,kube_deployment:payments-production-globex",
+  "tags": "...", "link": "...", "date": "..."
+}
+```
+
+`transition` is the health event itself (`Triggered` / `Warn` / `Recovered` / `No Data` /
+`Renotify`), as distinct from `status`.
 
 ## Accessing the app UIs
 
