@@ -199,38 +199,51 @@ your Datadog site.
 
 ### Optional: Datadog monitors
 
-Also set `datadog_app_key` to have Terraform manage a Datadog monitor mirroring the
+Also set `datadog_app_key` to have Terraform manage Datadog monitors mirroring the
 `alerting_rules.yml` tiers in `prometheus.tf`. The APP key is a second, independent
 gate: the Agent needs only an API key, so with no APP key you still get metrics and
 simply no monitors. With neither key the Datadog provider skips credential validation
 entirely, so a keyless `terraform plan` stays clean.
 
-`datadog_monitor.app_success_rate` folds `AppSuccessRateLow` and
-`AppSuccessRateCritical` into one monitor — Datadog escalates warning → critical
-itself, so it needs no equivalent of the PromQL `< 0.95 >= 0.8` band:
+Terraform manages **two** monitors, identical but for their `by {...}` clause. Both fold
+`AppSuccessRateLow` and `AppSuccessRateCritical` into a single monitor — Datadog escalates
+warning → critical itself, so neither needs an equivalent of the PromQL `< 0.95 >= 0.8`
+band:
 
-```
-avg(last_1m):avg:app_request_success_rate{owner:<owner>} by {project,environment,tenant} < 0.8
-```
+| Resource | Query | Covers |
+|---|---|---|
+| `datadog_monitor.app_success_rate` | `avg(last_1m):avg:app_request_success_rate{owner:<owner>} by {project,environment,tenant} < 0.8` | the two tenanted `payments-production` instances |
+| `datadog_monitor.app_success_rate_no_tenant` | `… by {project,environment} < 0.8` | all five instances, tenants rolled up |
 
-with `warning = 0.95`, `critical = 0.8`, and `notify_no_data` after 10m to surface the
-`absent`/`down` modes as the first-class Unknown state.
+Both carry `warning = 0.95`, `critical = 0.8`, and `notify_no_data` after 10m to surface
+the `absent`/`down` modes as the first-class Unknown state, and each is tagged
+`grouping:…` so you can tell them apart in Datadog.
 
-One deliberate divergence from the PromQL:
+**Why a pair.** Datadog *excludes* any series missing a group-by tag, and the app omits
+`tenant` entirely when unset, so the tenant-grouped monitor covers only
+`payments-production-acme` and `payments-production-globex` — `checkout-production`,
+`checkout-staging` and `payments-staging` produce no group and drop out silently. No
+error; they simply aren't monitored. (Prometheus does *not* behave this way: it keeps
+those series with an empty `tenant`, so the PromQL rules cover all five from one rule.)
+Rather than work around the exclusion, the second monitor groups one dimension shallower
+on tags that are always present. Between the pair, every instance is monitored and the
+receiver sees both payload shapes — a body with a real `tenant` and a body without.
+
+Two deliberate divergences from the PromQL:
 
 - **`last_1m` does double duty.** Datadog has no separate sustain duration, so the
   window covers both `avg_over_time(...[20s])` and `for: 1m`.
+- **The no-tenant monitor dilutes per-tenant regressions.** Rolling tenants up means a
+  bad tenant is averaged with its healthy siblings: `payments-production` at `acme=1.0` /
+  `globex=0.90` averages `0.95`, landing on the warning boundary rather than tripping
+  critical, where the tenant-grouped monitor sees `globex` at `0.90` directly. `avg:` is
+  kept so the pair differs only in `by {...}`; swap the no-tenant one to `min:` (the
+  worst-of fold the README's example PromQL uses) if masking matters more than symmetry.
 
-**Known consequence of grouping on `tenant`.** Datadog *excludes* any series missing a
-group-by tag, and the app omits `tenant` entirely when unset. So this monitor covers only
-`payments-production-acme` and `payments-production-globex` — `checkout-production`,
-`checkout-staging` and `payments-staging` produce no group and drop out silently. No
-error; they simply aren't monitored. Prometheus does *not* behave this way: it keeps those
-series with an empty `tenant`, so the PromQL rules still cover all five.
-
-If the untenanted three need Datadog coverage, either group on `kube_deployment` (always
-present, one per instance, and its value already encodes the tenant —
-`payments-production-globex`) or have the app emit an explicit placeholder tenant.
+The other route to covering the untenanted three from a single monitor would be grouping on
+`kube_deployment` (always present, one per instance, and its value already encodes the
+tenant — `payments-production-globex`), or having the app emit an explicit placeholder
+tenant.
 
 ### Sharing a Datadog org with teammates
 
@@ -241,7 +254,7 @@ A Datadog org is one namespace for everyone, so `var.owner` scopes four things:
 | Agent global tag | `owner:<owner>` on every metric shipped (`datadog.tags`) |
 | Monitor query | `{owner:<owner>}` rather than `{*}` |
 | Monitor name + tags | `[live-status <owner>/<workspace>] …`, `owner:<owner>` |
-| Webhook name | `octopus-live-status-health-<owner>-<workspace>` |
+| Webhook names | `octopus-live-status-health-<owner>-<workspace>` and `…-no-tenant` |
 | Cluster name | `live-status-<owner>-<workspace>` |
 
 The query scope is the one that matters most. Every teammate's Agent ships
@@ -263,18 +276,24 @@ Alertmanager path is entirely local and has no shared surface to collide on.
 
 ### Datadog webhook
 
-`datadog_webhook.health_events` POSTs every health event to `var.datadog_webhook_url`,
-which is **empty by default** — a committed URL would point every teammate's alerts at
-one person's tunnel. It's a third gate on top of the APP key: blank the URL and no
-webhook is created.
+`datadog_webhook.health_events` and `datadog_webhook.health_events_no_tenant` POST every
+health event to `var.datadog_webhook_url`, which is **empty by default** — a committed URL
+would point every teammate's alerts at one person's tunnel. It's a third gate on top of the
+APP key: blank the URL and neither webhook is created.
+
+**One webhook per monitor, both pointing at the same URL.** They are identical but for the
+constant `alertname` they emit (`AppSuccessRate` vs `AppSuccessRateNoTenant`). Payload
+templates have no branching and nothing in the body reveals the monitor's grouping, so a
+webhook each is the only way the receiver can tell a tenant-grouped event from a
+project/environment-grouped one.
 
 Unlike the Alertmanager webhook, **Datadog calls from its own servers**, so this URL
 has to be publicly reachable; `host.lima.internal` or `localhost` won't do.
 
-The monitor references it as `@webhook-<name>` placed *outside* every `{{#is_*}}`
-block — a handle nested inside one only fires for that state, whereas at the top level
-it fires on every transition the monitor notifies about: triggered, warning, recovery,
-and no data. The webhook name carries the workspace because Datadog webhooks are
+Each monitor references its own handle as `@webhook-<name>` placed *outside* every
+`{{#is_*}}` block — a handle nested inside one only fires for that state, whereas at the top
+level it fires on every transition the monitor notifies about: triggered, warning, recovery,
+and no data. Both webhook names carry the owner and workspace because Datadog webhooks are
 org-global.
 
 The payload deliberately mirrors the Alertmanager webhook's flat shape, so one endpoint
@@ -291,23 +310,28 @@ when the tag is absent):
 }
 ```
 
+The example above is a no-tenant-monitor body; the tenant-grouped monitor sends the same
+five keys with `"alertname": "AppSuccessRate"` and a populated `"tenant"`.
+
 **Three fields can't match the Alertmanager body exactly**, and the gaps are structural
 rather than oversights:
 
 | Field | Alertmanager | Datadog | Why |
 |---|---|---|---|
 | `status` | `firing` / `resolved` | `Triggered` / `Warn` / `Recovered` / `No Data` / `Renotify` | Datadog's own vocabulary. Payload templates have no branching, so any mapping has to live in the receiver. |
-| `tenant` | the tag, or absent | always `""` | Not in the monitor's `group_by` — grouping on it would drop every untenanted instance (see above) — and a payload template can't emit a JSON `null`. |
-| `alertname` | per-rule (`AppSuccessRateCritical` vs `…Low`) | constant `AppSuccessRate` | One Datadog monitor spans both tiers via `warning`/`critical` thresholds, so there is no per-tier name to emit. |
+| `tenant` | the tag, or absent | the tag from the tenant-grouped monitor; always `""` from the no-tenant one | `$TAGS[tenant]` resolves only when `tenant` is a group tag. The key is kept in both bodies (rendering `""`) rather than dropped, since a payload template can't emit a JSON `null`. |
+| `alertname` | per-rule (`AppSuccessRateCritical` vs `…Low`) | per-monitor (`AppSuccessRate` vs `AppSuccessRateNoTenant`), not per-tier | Each Datadog monitor spans both tiers via `warning`/`critical` thresholds, so the name distinguishes the *grouping*, not the severity. |
 
 If exact parity matters more than the current shape:
 
-- **`alertname` per tier** — split into two monitors. Note Datadog can't express the
-  PromQL `< 0.95 >= 0.8` exclusive band in `monitor_thresholds`, so both would fire below
-  0.8 unless the queries are reworked.
-- **`tenant` populated** — either add it to `group_by` and accept losing the three
-  untenanted instances, or have the receiver parse it out of the deployment name
-  (`payments-production-globex`).
+- **`alertname` per tier** — split each monitor into a warning and a critical one (four
+  monitors, four webhooks). Note Datadog can't express the PromQL `< 0.95 >= 0.8` exclusive
+  band in `monitor_thresholds`, so both tiers would fire below 0.8 unless the queries are
+  reworked.
+- **`tenant` populated on every event** — the tenant-grouped monitor already does this for
+  the instances that have one. For the untenanted three, the options are grouping on
+  `kube_deployment` (whose value encodes the tenant — `payments-production-globex`), having
+  the receiver parse it out of that name, or having the app emit a placeholder tenant.
 - **`status` vocabulary** — map `Recovered → resolved`, everything else `→ firing`, in the
   receiver.
 

@@ -28,10 +28,18 @@ locals {
   # message doesn't depend on the webhook's computed attributes.
   datadog_webhook_enabled = local.datadog_monitors_enabled && var.datadog_webhook_url != ""
   datadog_webhook_name    = "octopus-live-status-health-${var.owner}-${replace(terraform.workspace, ".", "-")}"
+
+  # The no-tenant monitor gets its own webhook pointing at the same URL. It
+  # exists only to carry a different constant alertname: payload templates have
+  # no branching, so one webhook per monitor is the only way the receiver can
+  # tell which grouping produced an event.
+  datadog_webhook_no_tenant_name = "${local.datadog_webhook_name}-no-tenant"
+
   # nonsensitive() because the enable flag derives from the (sensitive) key
   # variables, and without it that taint spreads into the monitor's message and
   # redacts the whole thing in plan output. The handle is only a name.
-  datadog_webhook_handle = nonsensitive(local.datadog_webhook_enabled) ? "@webhook-${local.datadog_webhook_name}" : ""
+  datadog_webhook_handle           = nonsensitive(local.datadog_webhook_enabled) ? "@webhook-${local.datadog_webhook_name}" : ""
+  datadog_webhook_no_tenant_handle = nonsensitive(local.datadog_webhook_enabled) ? "@webhook-${local.datadog_webhook_no_tenant_name}" : ""
 }
 
 resource "kubernetes_namespace_v1" "datadog" {
@@ -139,10 +147,9 @@ resource "helm_release" "datadog" {
 #   status     Datadog's vocabulary is Triggered/Warn/Recovered/No Data, not
 #              Alertmanager's firing/resolved. No branching in a payload
 #              template, so the mapping belongs in the receiver.
-#   tenant     now in the monitor's group_by, so it resolves — but a payload
-#              template can't emit a JSON null, so an absent tenant would
-#              render "". In practice untenanted instances don't reach this
-#              webhook at all: grouping on tenant excludes them (see below).
+#   tenant     in this monitor's group_by, so it resolves. Untenanted instances
+#              don't reach this webhook at all — grouping on tenant excludes
+#              them, which is what the sibling no-tenant monitor below covers.
 resource "datadog_webhook" "health_events" {
   count = local.datadog_webhook_enabled ? 1 : 0
 
@@ -159,6 +166,26 @@ resource "datadog_webhook" "health_events" {
   })
 }
 
+# Same URL, same five keys, different constant alertname — so the receiver can
+# tell a tenant-grouped event from a project/environment-grouped one. `tenant` is
+# kept in the body (rendering "") rather than dropped, so every provider and
+# every monitor here POST the same shape.
+resource "datadog_webhook" "health_events_no_tenant" {
+  count = local.datadog_webhook_enabled ? 1 : 0
+
+  name      = local.datadog_webhook_no_tenant_name
+  url       = var.datadog_webhook_url
+  encode_as = "json"
+
+  payload = jsonencode({
+    alertname   = "AppSuccessRateNoTenant"
+    environment = "$TAGS[environment]"
+    project     = "$TAGS[project]"
+    status      = "$ALERT_TRANSITION"
+    tenant      = "$TAGS[tenant]"
+  })
+}
+
 # Mirrors the AppSuccessRateLow / AppSuccessRateCritical pair as one monitor:
 # Datadog escalates warning -> critical on its own, so it needs no equivalent of
 # the PromQL rules' explicit `< 0.95 >= 0.8` band to keep the tiers exclusive.
@@ -166,14 +193,14 @@ resource "datadog_webhook" "health_events" {
 # Grouped on the same PET labels as the PromQL rules now that the app emits
 # them under those names.
 #
-# KNOWN CONSEQUENCE, being tried deliberately: Datadog excludes any series
-# missing a group-by tag, and the app omits `tenant` entirely when unset. So
-# this monitor covers only the two tenanted payments instances; checkout
-# production/staging and payments staging drop out of the query silently — no
-# error, they simply produce no group. Watch the monitor's group list after
-# apply to confirm. If the untenanted three need covering, either group on
-# kube_deployment instead (always present, one per instance, and its value
-# encodes the tenant) or have the app emit an explicit placeholder tenant.
+# SCOPE: this monitor sees only the tenanted instances. Datadog excludes any
+# series missing a group-by tag, and the app omits `tenant` entirely when unset,
+# so payments-production-acme and payments-production-globex produce groups and
+# checkout-production, checkout-staging and payments-staging silently produce
+# none. That exclusion is not worked around here — the sibling
+# app_success_rate_no_tenant monitor below covers the same five instances without
+# the tenant dimension, so between the pair every instance is monitored and both
+# payload shapes reach the receiver.
 resource "datadog_monitor" "app_success_rate" {
   count = local.datadog_monitors_enabled ? 1 : 0
 
@@ -226,5 +253,58 @@ resource "datadog_monitor" "app_success_rate" {
     "app:synthetic-service",
     "owner:${var.owner}",
     "workspace:${terraform.workspace}",
+    "grouping:project-environment-tenant",
+  ]
+}
+
+# The same monitor grouped one dimension shallower: project/environment only.
+# Both tags are always present, so nothing is excluded and all five instances
+# produce a group — which is the point of running the pair.
+#
+# TRADE-OFF, deliberate: rolling tenants up means a single bad tenant is diluted
+# by its healthy siblings. payments-production at acme=1.0 / globex=0.90 averages
+# 0.95, which lands on the warning boundary rather than tripping critical, where
+# the tenant-grouped monitor above sees globex at 0.90 directly. `avg:` is kept so
+# this stays a true duplicate of that monitor, differing only in group_by; swap it
+# for `min:` (the worst-of fold) if masking matters more than symmetry.
+resource "datadog_monitor" "app_success_rate_no_tenant" {
+  count = local.datadog_monitors_enabled ? 1 : 0
+
+  name = "[live-status ${var.owner}/${terraform.workspace}] Synthetic app success rate (no tenant grouping)"
+  type = "query alert"
+
+  query = "avg(last_1m):avg:app_request_success_rate{owner:${var.owner}} by {project,environment} < 0.8"
+
+  monitor_thresholds {
+    warning  = 0.95
+    critical = 0.8
+  }
+
+  # No tenant in the message: it isn't a group tag here, so {{tenant.name}} has
+  # nothing to resolve against.
+  message = <<-EOT
+    {{#is_alert}}Success rate critical for {{project.name}}/{{environment.name}}: 1m-averaged app_request_success_rate is {{value}} (< 0.8), averaged across all tenants.{{/is_alert}}
+    {{#is_warning}}Success rate low for {{project.name}}/{{environment.name}}: 1m-averaged app_request_success_rate is {{value}} (in [0.8, 0.95)), averaged across all tenants.{{/is_warning}}
+    {{#is_no_data}}No success-rate data for {{project.name}}/{{environment.name}} — every instance in it is in absent/down mode or its pod is gone. This is the Unknown state, which is distinct from Unhealthy.{{/is_no_data}}
+    {{#is_recovery}}Success rate recovered for {{project.name}}/{{environment.name}}: now {{value}}.{{/is_recovery}}
+
+    ${local.datadog_webhook_no_tenant_handle}
+  EOT
+
+  depends_on = [datadog_webhook.health_events_no_tenant]
+
+  notify_no_data    = true
+  no_data_timeframe = 10
+
+  evaluation_delay = 60
+
+  include_tags = true
+
+  tags = [
+    "managed-by:terraform",
+    "app:synthetic-service",
+    "owner:${var.owner}",
+    "workspace:${terraform.workspace}",
+    "grouping:project-environment",
   ]
 }
