@@ -4,22 +4,41 @@
 # datadog.tf pattern — a namespace + a helm_release into the Colima cluster, up
 # at `terraform apply`.
 #
-# Trimmed to the server only (no alertmanager / pushgateway / node-exporter /
-# kube-state-metrics). The chart's default `kubernetes-pods` scrape job keeps
+# Trimmed to the server plus alertmanager (no pushgateway / node-exporter /
+# kube-state-metrics). Alertmanager was originally trimmed too, but Prometheus
+# alone can't notify anything — alerting rules only fire alerts internally, and
+# delivering them is Alertmanager's job — so it's back, carrying the webhook to
+# the Octopus test endpoint.
+# The chart's default `kubernetes-pods` scrape job keeps
 # pods annotated prometheus.io/scrape: "true" — the same annotations the
 # synthetic-service pods carry — so Prometheus scrapes them with no app changes.
 # server.fullnameOverride + servicePort keep the Service named `prometheus` on
-# 9090, so existing `svc/prometheus 9090` port-forwards and the
-# http://prometheus.localhost Ingress keep working.
+# 9090, so existing `svc/prometheus 9090` port-forwards keep working; the
+# Ingress is at http://prometheus-<workspace>.localhost.
+#
+# Everything cluster-scoped here is suffixed with the workspace so the config
+# can be applied into several workspaces against the same cluster.
 
 locals {
+  # Everything this file creates that lives in a cluster-wide namespace — the
+  # Namespace itself, the chart's ClusterRole/ClusterRoleBinding, and the
+  # Ingress hostname — has to carry the workspace, or a second workspace
+  # collides with the first. Matches the suffix agent.tf and datadog.tf use.
+  monitoring_suffix = replace(terraform.workspace, ".", "-")
+
   # Shared base query for the success-rate alert tiers.
   success_rate_20s = "avg by (service, env, tenant) (avg_over_time(app_request_success_rate[20s]))"
+
+  # host.lima.internal, not localhost: Alertmanager posts from inside the
+  # cluster, where localhost is its own container. Same address the in-cluster
+  # agent uses to reach the Server (local.colima_octopus_address in main.tf),
+  # and the Server speaks http on 8065, not https.
+  webhook_target_url = "http://host.lima.internal:8065/api/test/webhook"
 }
 
 resource "kubernetes_namespace_v1" "monitoring" {
   metadata {
-    name = "live-status-monitoring"
+    name = "live-status-monitoring-${local.monitoring_suffix}"
   }
 }
 
@@ -33,11 +52,19 @@ resource "helm_release" "prometheus" {
   timeout    = 300
 
   set = [
-    # Server only — drop the bundled extras for a lean, single-node footprint.
+    # Required for any notification at all; also auto-wires the server's
+    # alerting.alertmanagers discovery, so no explicit server.alertmanagers.
     {
       name  = "alertmanager.enabled"
+      value = "true"
+    },
+    # Ephemeral, like the server below: no PVC, so no dependency on a default
+    # StorageClass (the chart otherwise provisions a 2Gi RWO volume).
+    {
+      name  = "alertmanager.persistence.enabled"
       value = "false"
     },
+    # Drop the remaining bundled extras for a lean, single-node footprint.
     {
       name  = "prometheus-pushgateway.enabled"
       value = "false"
@@ -75,16 +102,26 @@ resource "helm_release" "prometheus" {
       value = "false"
     },
     # Keep the Service named `prometheus` on 9090 so existing port-forward
-    # commands (svc/prometheus 9090) and docs stay valid.
+    # commands (svc/prometheus 9090) and docs stay valid. Safe to leave
+    # unsuffixed: Services are namespaced, and the namespace now carries the
+    # workspace.
     {
       name  = "server.fullnameOverride"
       value = "prometheus"
+    },
+    # The ClusterRole/ClusterRoleBinding are NOT namespaced, though, and the
+    # chart names them after server.fullnameOverride — so without this override
+    # a second workspace fails with "clusterroles.rbac.authorization.k8s.io
+    # \"prometheus\" already exists" right after the namespace is fixed.
+    {
+      name  = "server.clusterRoleNameOverride"
+      value = "prometheus-${local.monitoring_suffix}"
     },
     {
       name  = "server.service.servicePort"
       value = "9090"
     },
-    # Ingress at http://prometheus.localhost via Traefik (as before).
+    # Ingress at http://prometheus-<workspace>.localhost via Traefik.
     {
       name  = "server.ingress.enabled"
       value = "true"
@@ -97,8 +134,11 @@ resource "helm_release" "prometheus" {
 
   set_list = [
     {
-      name  = "server.ingress.hosts"
-      value = ["prometheus.localhost"]
+      name = "server.ingress.hosts"
+      # Ingress objects are namespaced, but the hostname is a cluster-wide
+      # routing key: two workspaces both claiming prometheus.localhost would
+      # apply cleanly and then route ambiguously.
+      value = ["prometheus-${local.monitoring_suffix}.localhost"]
     },
   ]
 
@@ -107,6 +147,78 @@ resource "helm_release" "prometheus" {
   # spaces and operators.
   values = [
     yamlencode({
+      # Every alert goes to the Octopus webhook, the only receiver. Helm replaces
+      # lists wholesale, so this drops the chart's default-receiver rather than
+      # adding alongside it.
+      alertmanager = {
+        # Ingress at http://alertmanager-<workspace>.localhost via Traefik. Set
+        # here rather than in `set_list` alongside the server's: this subchart
+        # takes `className` (not `ingressClassName`) and `hosts` as a list of
+        # {host, paths} objects rather than plain strings.
+        ingress = {
+          enabled   = true
+          className = "traefik"
+          hosts = [
+            {
+              host = "alertmanager-${local.monitoring_suffix}.localhost"
+              paths = [
+                {
+                  path     = "/"
+                  pathType = "Prefix"
+                }
+              ]
+            }
+          ]
+        }
+
+        config = {
+          route = {
+            # Grouping on the PET labels does real work here: webhook_config
+            # renders one payload per *group*, and the payload below reads
+            # .GroupLabels. Grouping this way therefore yields one call per
+            # application instance carrying that instance's PET, rather than
+            # collapsing every instance's alert of the same name into one call
+            # with no usable identity.
+            group_by        = ["alertname", "service", "env", "tenant"]
+            group_wait      = "10s"
+            group_interval  = "1m"
+            repeat_interval = "1h"
+            receiver        = "octopus-test-webhook"
+          }
+          receivers = [
+            {
+              name = "octopus-test-webhook"
+              webhook_configs = [
+                {
+                  url           = local.webhook_target_url
+                  send_resolved = true
+
+                  # Alertmanager's own envelope nests the labels; `payload`
+                  # (Alertmanager >= v0.31, chart appVersion here is v0.33.0)
+                  # replaces it with this flat body instead. Alertmanager does
+                  # no validation on the result, so the shape is ours to keep
+                  # right.
+                  #
+                  # This is also where the app's metric labels are mapped onto
+                  # Octopus's PET names, so the alert rules keep emitting plain
+                  # service/env and the renaming lives in exactly one place.
+                  # Templating runs with missingkey=zero over a
+                  # map[string]string, so an untenanted instance renders
+                  # tenant as "" rather than "<no value>".
+                  payload = {
+                    project     = "{{ .GroupLabels.service }}"
+                    environment = "{{ .GroupLabels.env }}"
+                    tenant      = "{{ .GroupLabels.tenant }}"
+                    status      = "{{ .Status }}"
+                    alertname   = "{{ .GroupLabels.alertname }}"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+
       serverFiles = {
         "alerting_rules.yml" = {
           groups = [

@@ -13,12 +13,15 @@ deployment processes as modules under `../deployment_processes/`).
 - Kubernetes agent (`Live Status Agent`, role `live-status`) installed by Helm into the cluster. The
   `kubernetesMonitor` is not installed (that's the k8s live-object monitor, separate from the Prometheus
   app-monitoring exercised here).
-- Prometheus (namespace `live-status-monitoring`), deployed by Terraform via the
-  `prometheus-community/prometheus` Helm chart (`prometheus.tf`) — server only, annotation-based pod
-  scraping, Service `prometheus:9090`, and an Ingress at `http://prometheus.localhost`. Comes up at
+- Prometheus (namespace `live-status-monitoring-<workspace>`), deployed by Terraform via the
+  `prometheus-community/prometheus` Helm chart (`prometheus.tf`) — server plus Alertmanager,
+  annotation-based pod scraping, Service `prometheus:9090`, and Ingresses at
+  `http://prometheus-<workspace>.localhost` and `http://alertmanager-<workspace>.localhost`.
+  Comes up at
   `terraform apply` (no Octopus project involved). Migrating a cluster that already has an
-  Octopus-deployed Prometheus in this namespace? Delete it first (`kubectl delete ns live-status-monitoring`)
-  so Terraform doesn't collide with the existing resources.
+  Octopus-deployed Prometheus in this namespace? Delete it first
+  (`kubectl delete ns live-status-monitoring-<workspace>`) so Terraform doesn't collide with the
+  existing resources.
 - checkout (untenanted) and payments (tenanted: `acme`, `globex`) projects →
   `../deployment_processes/synthetic_service_process`: deploy the app. Project name = the `service` label.
   A prompted Variant (Good/Bad) drives `App.ErrorRate`; `Octopus.Release.Number` → the `release`
@@ -54,9 +57,38 @@ terraform apply            # creates space, agent + prometheus (helm), test proj
 # wait for the "Live Status Agent" target to go healthy in Octopus
 ```
 
+### Multiple workspaces on one cluster
+
+Every cluster-scoped name this config creates carries `terraform.workspace`, so the whole
+stack can be stood up several times against the same Colima cluster:
+
+```
+terraform workspace new live-status-dev
+terraform apply
+```
+
+Per workspace you get its own Octopus space, agent namespace, Prometheus namespace
+(`live-status-monitoring-<workspace>`), Prometheus `ClusterRole`/`ClusterRoleBinding`
+(`prometheus-<workspace>`), Ingress hosts (`prometheus-<workspace>.localhost` and
+`alertmanager-<workspace>.localhost`), Datadog namespace, and Datadog monitor.
+
+Two things are *not* workspace-scoped, and will collide if you run app deployments from
+more than one workspace at a time:
+
+- **The app namespaces**, `live-status-<environment>` — they come from the Octopus
+  deployment process (`../deployment_processes/synthetic_service_process`), which names
+  them from the Octopus environment, not the Terraform workspace.
+- **The app Ingress hosts**, `<project>-<environment>[-<tenant>].localhost`, for the same
+  reason.
+
+Prometheus scrapes by pod annotation across all namespaces, so each workspace's Prometheus
+picks up whatever synthetic-service pods exist, whichever workspace deployed them.
+
 1. Prometheus is already up — Terraform deploys it at `terraform apply`. View it at
-   `http://prometheus.localhost`, or `kubectl -n live-status-monitoring port-forward svc/prometheus 9090:9090`
-   → http://localhost:9090
+   `http://prometheus-<workspace>.localhost`, or
+   `kubectl -n live-status-monitoring-<workspace> port-forward svc/prometheus 9090:9090`
+   → http://localhost:9090 (`terraform output prometheus_ui_hint` prints both for the current
+   workspace)
 2. Baseline good: release payments, pick the image tag, deploy to Production for `acme` (and
    `globex`) with Variant=Good. Repeat checkout → Production. Confirm pods:
    `kubectl -n live-status-production get pods`.
@@ -66,6 +98,55 @@ terraform apply            # creates space, agent + prometheus (helm), test proj
    pod (new `release`, error rate 0.10); success rate drops < 0.95 within a scrape or two. That's the
    deployment-correlated regression.
 5. Roll forward: new release, Variant=Good → recovers.
+
+## Alerting and the Octopus webhook
+
+`prometheus.tf` defines four rules in the `live-status` group — `AppUpDegraded`,
+`AppSuccessRateLow`, `AppSuccessRateCritical` and `AppTargetDown` — and routes all of
+them to a single Alertmanager receiver that POSTs to the Octopus test endpoint.
+
+Alertmanager is enabled for this (Prometheus itself only fires alerts internally;
+delivering them is Alertmanager's job). Enabling it also auto-wires the server's
+`alerting.alertmanagers` discovery, so there's no explicit `server.alertmanagers`.
+
+The receiver uses `webhook_config`'s `payload`, which replaces Alertmanager's own
+envelope with a flat body:
+
+```json
+{
+  "project": "payments",
+  "environment": "production",
+  "tenant": "globex",
+  "status": "firing",
+  "alertname": "AppSuccessRateCritical"
+}
+```
+
+Worth knowing:
+
+- **`payload` needs Alertmanager ≥ v0.31**; the chart pinned here ships v0.33.0.
+  Alertmanager performs no validation on the rendered body, so the shape is ours to
+  keep correct.
+- **The PET renaming lives only in the payload.** The alert rules keep emitting the
+  app's own `service`/`env`/`tenant` labels, and the template maps them to
+  Octopus's `project`/`environment`/`tenant`.
+- **`group_by` is load-bearing.** The payload renders once per *group* and reads
+  `.GroupLabels`, so grouping by `[alertname, service, env, tenant]` is what makes each
+  call carry a single instance's identity.
+- **The URL is `host.lima.internal:8065`, not `localhost`.** Alertmanager posts from
+  inside the cluster, where `localhost` is its own container — same address the
+  in-cluster agent uses (`local.colima_octopus_address`). It's `http`, not `https`.
+- **`AppTargetDown` carries no PET labels** (it's pod-level, off the scrape-level `up`
+  series), so it arrives with `project`/`environment`/`tenant` empty. Untenanted
+  instances likewise send `tenant: ""` — Alertmanager templates with
+  `missingkey=zero`, so a missing label renders empty rather than `<no value>`.
+- **No auth header is sent.** If the endpoint needs one, add it under the receiver's
+  `http_config`.
+
+Watch it work: drive an instance unhealthy from its control panel (error rate > 0.05), then
+check Alertmanager at `http://alertmanager-<workspace>.localhost` (or
+`kubectl -n live-status-monitoring-<workspace> port-forward svc/prometheus-alertmanager 9093:9093`).
+Alerts need `for: 1m` plus `group_wait` before the first call goes out.
 
 ## Optional: mirror metrics to Datadog
 
@@ -157,7 +238,7 @@ Reaching Traefik's `:80` entrypoint from the host differs by platform:
   Traefik is running, `http://<instance>.localhost` resolves through it.
 - Fallback (any platform, no Ingress needed): port-forward straight to a pod:
   `kubectl -n live-status-production port-forward deploy/checkout-production 8080:8080` → http://localhost:8080.
-  Prometheus: `kubectl -n live-status-monitoring port-forward svc/prometheus 9090:9090`.
+  Prometheus: `kubectl -n live-status-monitoring-<workspace> port-forward svc/prometheus 9090:9090`.
 
 ## Verify the Terraform itself
 
