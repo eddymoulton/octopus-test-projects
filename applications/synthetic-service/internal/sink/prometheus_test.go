@@ -165,6 +165,39 @@ func TestNewPrometheusSink_OmitsTenantWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestNewPrometheusSink_StampsSourceOnEverySeries verifies the synthetic
+// marker reaches every metric family, including app_up/app_build_info, which
+// survive absent mode and would otherwise be the one unlabelled thing a
+// consumer could mistake for a real application's series.
+func TestNewPrometheusSink_StampsSourceOnEverySeries(t *testing.T) {
+	cfg := config.Load()
+	id := config.Identity{Service: "checkout", Env: "production", Tenant: "acme", Release: "1.4.2"}
+
+	p := NewPrometheusSink(id, cfg)
+	p.Observe(RequestObservation{Success: true, LatencyMs: 50})
+
+	fams, err := p.registry.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	if len(fams) == 0 {
+		t.Fatal("gathered no metric families")
+	}
+	for _, f := range fams {
+		for _, m := range f.GetMetric() {
+			var got string
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == "source" {
+					got = lp.GetValue()
+				}
+			}
+			if got != SourceLabelValue {
+				t.Errorf("metric %q has source=%q, want %q", f.GetName(), got, SourceLabelValue)
+			}
+		}
+	}
+}
+
 // TestPrometheusSink_AbsentModeDropsWorkloadSeries verifies the absent-mode
 // gatherer keeps only app_up/app_build_info (the empty-result -> Unknown path).
 func TestPrometheusSink_AbsentModeDropsWorkloadSeries(t *testing.T) {

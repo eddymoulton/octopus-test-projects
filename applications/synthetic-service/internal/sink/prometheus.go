@@ -21,6 +21,13 @@ var workloadMetricNames = map[string]bool{
 	"app_request_success_rate":     true,
 }
 
+// SourceLabelValue is stamped onto every series this app emits, as the
+// constant `source` label. Nothing this service produces is real traffic, so
+// the marker is fixed rather than configurable: any scrape carrying it is a
+// local synthetic test instance and must never be read as a real application's
+// health.
+const SourceLabelValue = "local-test"
+
 // PrometheusSink is the only real sink today: it maintains a private
 // prometheus.Registry (deliberately not the global DefaultRegisterer, so the
 // scrape surface is exactly the app_* metrics below, with no go_*/process_*
@@ -42,12 +49,14 @@ type PrometheusSink struct {
 
 // NewPrometheusSink builds the private registry and registers the fixed set
 // of app_* collectors with the PET identity applied as constant labels
-// (tenant omitted entirely when id.Tenant is empty).
+// (tenant omitted entirely when id.Tenant is empty), plus the fixed source
+// marker identifying the series as synthetic.
 func NewPrometheusSink(id config.Identity, cfg *config.Config) *PrometheusSink {
 	constLabels := prometheus.Labels{
 		"service": id.Service,
 		"env":     id.Env,
 		"release": id.Release,
+		"source":  SourceLabelValue,
 	}
 	if id.Tenant != "" {
 		constLabels["tenant"] = id.Tenant

@@ -61,6 +61,21 @@ Every app metric carries:
 - `env` → Environment
 - `tenant` → Tenant (optional; omitted entirely when unset)
 - `release` → Release / version
+- `source` → always `local-test` (see below)
+
+## Synthetic Source Marker
+
+Every series this app emits carries a constant `source="local-test"` label, including
+`app_up` and `app_build_info` (the two that survive `absent` mode). Nothing here is real
+traffic, so the marker is hardcoded rather than configurable — if a series carries it, it
+came from a synthetic test instance and must not be read as a real application's health.
+
+Use it to keep synthetic data out of queries that expect real apps:
+
+```promql
+app_request_success_rate{source!="local-test"}   # real apps only
+app_request_success_rate{source="local-test"}    # synthetic only
+```
 
 ## Metric Surface
 
