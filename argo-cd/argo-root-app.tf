@@ -26,11 +26,11 @@ resource "octopusdeploy_process_step" "argo_root_app" {
     "Octopus.Action.TargetRoles" = "argo-k8s-agent"
   }
   execution_properties = {
-    "Octopus.Action.Kubernetes.DeploymentTimeout"              = "180"
-    "Octopus.Action.Kubernetes.ResourceStatusCheck"            = "True"
-    "Octopus.Action.Kubernetes.ServerSideApply.Enabled"        = "True"
-    "Octopus.Action.Kubernetes.ServerSideApply.ForceConflicts" = "True"
-    "Octopus.Action.Script.ScriptSource"                       = "GitRepository"
+    "Octopus.Action.Kubernetes.DeploymentTimeout"                    = "180"
+    "Octopus.Action.Kubernetes.ResourceStatusCheck"                  = "True"
+    "Octopus.Action.Kubernetes.ServerSideApply.Enabled"              = "True"
+    "Octopus.Action.Kubernetes.ServerSideApply.ForceConflicts"       = "True"
+    "Octopus.Action.Script.ScriptSource"                             = "GitRepository"
     "Octopus.Action.KubernetesContainers.CustomResourceYamlFileName" = "argo-root-app/argo-root-app.yaml"
   }
 
