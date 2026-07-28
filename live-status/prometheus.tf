@@ -27,7 +27,7 @@ locals {
   monitoring_suffix = replace(terraform.workspace, ".", "-")
 
   # Shared base query for the success-rate alert tiers.
-  success_rate_20s = "avg by (service, env, tenant) (avg_over_time(app_request_success_rate[20s]))"
+  success_rate_20s = "avg by (project, environment, tenant) (avg_over_time(app_request_success_rate[20s]))"
 
   # host.lima.internal, not localhost: Alertmanager posts from inside the
   # cluster, where localhost is its own container. Same address the in-cluster
@@ -179,7 +179,7 @@ resource "helm_release" "prometheus" {
             # application instance carrying that instance's PET, rather than
             # collapsing every instance's alert of the same name into one call
             # with no usable identity.
-            group_by        = ["alertname", "service", "env", "tenant"]
+            group_by        = ["alertname", "project", "environment", "tenant"]
             group_wait      = "10s"
             group_interval  = "1m"
             repeat_interval = "1h"
@@ -199,15 +199,14 @@ resource "helm_release" "prometheus" {
                   # no validation on the result, so the shape is ours to keep
                   # right.
                   #
-                  # This is also where the app's metric labels are mapped onto
-                  # Octopus's PET names, so the alert rules keep emitting plain
-                  # service/env and the renaming lives in exactly one place.
-                  # Templating runs with missingkey=zero over a
-                  # map[string]string, so an untenanted instance renders
-                  # tenant as "" rather than "<no value>".
+                  # Straight pass-through now that the app emits PET label
+                  # names directly — no renaming step to get wrong. Templating
+                  # runs with missingkey=zero over a map[string]string, so an
+                  # untenanted instance renders tenant as "" rather than
+                  # "<no value>".
                   payload = {
-                    project     = "{{ .GroupLabels.service }}"
-                    environment = "{{ .GroupLabels.env }}"
+                    project     = "{{ .GroupLabels.project }}"
+                    environment = "{{ .GroupLabels.environment }}"
                     tenant      = "{{ .GroupLabels.tenant }}"
                     status      = "{{ .Status }}"
                     alertname   = "{{ .GroupLabels.alertname }}"
@@ -228,14 +227,14 @@ resource "helm_release" "prometheus" {
                 # app_up is only ever 1, so this trips only on partial scrape gaps.
                 {
                   alert = "AppUpDegraded"
-                  expr  = "avg by (service, env, tenant) (avg_over_time(app_up[20s])) < 1"
+                  expr  = "avg by (project, environment, tenant) (avg_over_time(app_up[20s])) < 1"
                   "for" = "1m"
                   labels = {
                     severity = "warning"
                   }
                   annotations = {
-                    summary     = "app_up degraded for {{ $labels.service }}/{{ $labels.env }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
-                    description = "20s-averaged app_up is {{ $value }} (< 1) for service={{ $labels.service }} env={{ $labels.env }} tenant={{ $labels.tenant }}."
+                    summary     = "app_up degraded for {{ $labels.project }}/{{ $labels.environment }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
+                    description = "20s-averaged app_up is {{ $value }} (< 1) for project={{ $labels.project }} environment={{ $labels.environment }} tenant={{ $labels.tenant }}."
                   }
                 },
                 # Warning band [0.8, 0.95); the >= 0.8 bound keeps it exclusive
@@ -248,8 +247,8 @@ resource "helm_release" "prometheus" {
                     severity = "warning"
                   }
                   annotations = {
-                    summary     = "Success rate low for {{ $labels.service }}/{{ $labels.env }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
-                    description = "20s-averaged app_request_success_rate is {{ $value }} (in [0.8, 0.95)) for service={{ $labels.service }} env={{ $labels.env }} tenant={{ $labels.tenant }}."
+                    summary     = "Success rate low for {{ $labels.project }}/{{ $labels.environment }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
+                    description = "20s-averaged app_request_success_rate is {{ $value }} (in [0.8, 0.95)) for project={{ $labels.project }} environment={{ $labels.environment }} tenant={{ $labels.tenant }}."
                   }
                 },
                 {
@@ -260,8 +259,8 @@ resource "helm_release" "prometheus" {
                     severity = "critical"
                   }
                   annotations = {
-                    summary     = "Success rate critical for {{ $labels.service }}/{{ $labels.env }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
-                    description = "20s-averaged app_request_success_rate is {{ $value }} (< 0.8) for service={{ $labels.service }} env={{ $labels.env }} tenant={{ $labels.tenant }}."
+                    summary     = "Success rate critical for {{ $labels.project }}/{{ $labels.environment }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
+                    description = "20s-averaged app_request_success_rate is {{ $value }} (< 0.8) for project={{ $labels.project }} environment={{ $labels.environment }} tenant={{ $labels.tenant }}."
                   }
                 },
                 # A hard-down pod stops emitting app_up, so catch a full outage

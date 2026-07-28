@@ -165,6 +165,54 @@ func TestNewPrometheusSink_OmitsTenantWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestNewPrometheusSink_EmitsPETLabelNames pins the emitted label names. They
+// are the contract every consumer groups on — the Prometheus alerting rules,
+// the Alertmanager payload, and the Datadog monitor's group_by — and a rename
+// here breaks all three silently: PromQL groups the series under an empty label
+// rather than erroring, and Datadog drops them from the query altogether.
+func TestNewPrometheusSink_EmitsPETLabelNames(t *testing.T) {
+	cfg := config.Load()
+	id := config.Identity{Service: "payments", Env: "production", Tenant: "globex", Release: "1.4.2"}
+
+	p := NewPrometheusSink(id, cfg)
+	p.Observe(RequestObservation{Success: true, LatencyMs: 50})
+
+	fams, err := p.registry.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+
+	want := map[string]string{
+		"project":     "payments",
+		"environment": "production",
+		"tenant":      "globex",
+		"release":     "1.4.2",
+		"source":      SourceLabelValue,
+	}
+	for _, f := range fams {
+		for _, m := range f.GetMetric() {
+			got := map[string]string{}
+			for _, lp := range m.GetLabel() {
+				// status is a per-series variable label on app_requests_total,
+				// not part of the identity contract under test.
+				if lp.GetName() != "status" {
+					got[lp.GetName()] = lp.GetValue()
+				}
+			}
+			for k, v := range want {
+				if got[k] != v {
+					t.Errorf("metric %q: label %q = %q, want %q", f.GetName(), k, got[k], v)
+				}
+			}
+			for k := range got {
+				if _, ok := want[k]; !ok {
+					t.Errorf("metric %q carries unexpected identity label %q", f.GetName(), k)
+				}
+			}
+		}
+	}
+}
+
 // TestNewPrometheusSink_StampsSourceOnEverySeries verifies the synthetic
 // marker reaches every metric family, including app_up/app_build_info, which
 // survive absent mode and would otherwise be the one unlabelled thing a

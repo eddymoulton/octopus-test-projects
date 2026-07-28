@@ -128,9 +128,21 @@ resource "helm_release" "datadog" {
 # (which posts from inside the cluster to host.lima.internal) this URL has to be
 # publicly reachable — a tunnel, for a local rig.
 #
-# There is no per-tag variable available in a webhook payload, so the group
-# identity travels as $ALERT_SCOPE, which for this monitor's grouping renders
-# like "service:payments,env:production,kube_deployment:payments-production-globex".
+# The body deliberately mirrors the Alertmanager webhook's flat shape so one
+# endpoint can handle both. $TAGS[key] pulls a single tag out by name; per the
+# docs it yields an empty string when the tag is absent or valueless.
+#
+# Three values can't be reproduced exactly on this side — see the README for the
+# reasoning and the options:
+#   alertname  one Datadog monitor spans both tiers, so there is no per-tier
+#              name to emit; it is a constant here.
+#   status     Datadog's vocabulary is Triggered/Warn/Recovered/No Data, not
+#              Alertmanager's firing/resolved. No branching in a payload
+#              template, so the mapping belongs in the receiver.
+#   tenant     now in the monitor's group_by, so it resolves — but a payload
+#              template can't emit a JSON null, so an absent tenant would
+#              render "". In practice untenanted instances don't reach this
+#              webhook at all: grouping on tenant excludes them (see below).
 resource "datadog_webhook" "health_events" {
   count = local.datadog_webhook_enabled ? 1 : 0
 
@@ -139,17 +151,11 @@ resource "datadog_webhook" "health_events" {
   encode_as = "json"
 
   payload = jsonencode({
-    alert_id = "$ALERT_ID"
-    title    = "$ALERT_TITLE"
-    # Triggered | Warn | Recovered | No Data | Renotify — the actual health
-    # event, as distinct from the current status.
-    transition = "$ALERT_TRANSITION"
-    status     = "$ALERT_STATUS"
-    priority   = "$ALERT_PRIORITY"
-    scope      = "$ALERT_SCOPE"
-    tags       = "$TAGS"
-    link       = "$LINK"
-    date       = "$DATE"
+    alertname   = "AppSuccessRate"
+    environment = "$TAGS[environment]"
+    project     = "$TAGS[project]"
+    status      = "$ALERT_TRANSITION"
+    tenant      = "$TAGS[tenant]"
   })
 }
 
@@ -157,13 +163,17 @@ resource "datadog_webhook" "health_events" {
 # Datadog escalates warning -> critical on its own, so it needs no equivalent of
 # the PromQL rules' explicit `< 0.95 >= 0.8` band to keep the tiers exclusive.
 #
-# Grouping deliberately diverges from the PromQL `by (service, env, tenant)`.
-# Datadog drops any series missing a group-by tag, and the app omits `tenant`
-# entirely when unset (the PET contract), so grouping by it would silently
-# monitor only the two tenanted payments instances. kube_deployment is always
-# present and is one-per-instance, so it restores full coverage while keeping
-# the tenants apart — its value already encodes the tenant
-# (payments-production-globex).
+# Grouped on the same PET labels as the PromQL rules now that the app emits
+# them under those names.
+#
+# KNOWN CONSEQUENCE, being tried deliberately: Datadog excludes any series
+# missing a group-by tag, and the app omits `tenant` entirely when unset. So
+# this monitor covers only the two tenanted payments instances; checkout
+# production/staging and payments staging drop out of the query silently — no
+# error, they simply produce no group. Watch the monitor's group list after
+# apply to confirm. If the untenanted three need covering, either group on
+# kube_deployment instead (always present, one per instance, and its value
+# encodes the tenant) or have the app emit an explicit placeholder tenant.
 resource "datadog_monitor" "app_success_rate" {
   count = local.datadog_monitors_enabled ? 1 : 0
 
@@ -176,7 +186,7 @@ resource "datadog_monitor" "app_success_rate" {
   # Scoped to {owner:…}, not {*}: teammates share the Datadog org and all ship
   # identically-tagged app_* series, so an unscoped query alerts on everyone's
   # instances. The tag comes from the Agent's datadog.tags above.
-  query = "avg(last_1m):avg:app_request_success_rate{owner:${var.owner}} by {service,env,kube_deployment} < 0.8"
+  query = "avg(last_1m):avg:app_request_success_rate{owner:${var.owner}} by {project,environment,tenant} < 0.8"
 
   monitor_thresholds {
     warning  = 0.95
@@ -184,10 +194,10 @@ resource "datadog_monitor" "app_success_rate" {
   }
 
   message = <<-EOT
-    {{#is_alert}}Success rate critical for {{service.name}}/{{env.name}} ({{kube_deployment.name}}): 1m-averaged app_request_success_rate is {{value}} (< 0.8).{{/is_alert}}
-    {{#is_warning}}Success rate low for {{service.name}}/{{env.name}} ({{kube_deployment.name}}): 1m-averaged app_request_success_rate is {{value}} (in [0.8, 0.95)).{{/is_warning}}
-    {{#is_no_data}}No success-rate data for {{kube_deployment.name}} — the instance is in absent/down mode or its pod is gone. This is the Unknown state, which is distinct from Unhealthy.{{/is_no_data}}
-    {{#is_recovery}}Success rate recovered for {{service.name}}/{{env.name}} ({{kube_deployment.name}}): now {{value}}.{{/is_recovery}}
+    {{#is_alert}}Success rate critical for {{project.name}}/{{environment.name}} ({{tenant.name}}): 1m-averaged app_request_success_rate is {{value}} (< 0.8).{{/is_alert}}
+    {{#is_warning}}Success rate low for {{project.name}}/{{environment.name}} ({{tenant.name}}): 1m-averaged app_request_success_rate is {{value}} (in [0.8, 0.95)).{{/is_warning}}
+    {{#is_no_data}}No success-rate data for {{project.name}}/{{environment.name}} (tenant {{tenant.name}}) — the instance is in absent/down mode or its pod is gone. This is the Unknown state, which is distinct from Unhealthy.{{/is_no_data}}
+    {{#is_recovery}}Success rate recovered for {{project.name}}/{{environment.name}} ({{tenant.name}}): now {{value}}.{{/is_recovery}}
 
     ${local.datadog_webhook_handle}
   EOT

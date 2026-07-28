@@ -51,12 +51,18 @@ type PrometheusSink struct {
 // of app_* collectors with the PET identity applied as constant labels
 // (tenant omitted entirely when id.Tenant is empty), plus the fixed source
 // marker identifying the series as synthetic.
+//
+// The label names are Octopus's PET vocabulary — project/environment/tenant —
+// so consumers can group on them directly instead of translating. The Go field
+// names still say Service/Env; only the emitted label names are PET. Note
+// /api/state keeps its own service/env JSON keys, which are the app's identity
+// API and not metric labels.
 func NewPrometheusSink(id config.Identity, cfg *config.Config) *PrometheusSink {
 	constLabels := prometheus.Labels{
-		"service": id.Service,
-		"env":     id.Env,
-		"release": id.Release,
-		"source":  SourceLabelValue,
+		"project":     id.Service,
+		"environment": id.Env,
+		"release":     id.Release,
+		"source":      SourceLabelValue,
 	}
 	if id.Tenant != "" {
 		constLabels["tenant"] = id.Tenant

@@ -23,7 +23,7 @@ deployment processes as modules under `../deployment_processes/`).
   (`kubectl delete ns live-status-monitoring-<workspace>`) so Terraform doesn't collide with the
   existing resources.
 - checkout (untenanted) and payments (tenanted: `acme`, `globex`) projects →
-  `../deployment_processes/synthetic_service_process`: deploy the app. Project name = the `service` label.
+  `../deployment_processes/synthetic_service_process`: deploy the app. Project name = the `project` label.
   A prompted Variant (Good/Bad) drives `App.ErrorRate`; `Octopus.Release.Number` → the `release`
   label; the image tag is picked from the Docker feed per release. Each instance also gets a Service + a
   Traefik Ingress at `http://<instance>.localhost`.
@@ -102,8 +102,8 @@ picks up whatever synthetic-service pods exist, whichever workspace deployed the
 2. Baseline good: release payments, pick the image tag, deploy to Production for `acme` (and
    `globex`) with Variant=Good. Repeat checkout → Production. Confirm pods:
    `kubectl -n live-status-production get pods`.
-3. Observe healthy: in Prometheus, `avg by (service, env) (app_request_success_rate)` ≈ 1.0. Series carry
-   `service` / `env` / `tenant` / `release`.
+3. Observe healthy: in Prometheus, `avg by (project, environment) (app_request_success_rate)` ≈ 1.0. Series carry
+   `project` / `environment` / `tenant` / `release`.
 4. Bad deploy: new release of payments → Production/`acme`, Variant=Bad. The rollout replaces the
    pod (new `release`, error rate 0.10); success rate drops < 0.95 within a scrape or two. That's the
    deployment-correlated regression.
@@ -137,11 +137,10 @@ Worth knowing:
 - **`payload` needs Alertmanager ≥ v0.31**; the chart pinned here ships v0.33.0.
   Alertmanager performs no validation on the rendered body, so the shape is ours to
   keep correct.
-- **The PET renaming lives only in the payload.** The alert rules keep emitting the
-  app's own `service`/`env`/`tenant` labels, and the template maps them to
-  Octopus's `project`/`environment`/`tenant`.
+- **No renaming step.** The app emits `project`/`environment`/`tenant` directly, so
+  the rules, the `group_by` and the payload all use the same names end to end.
 - **`group_by` is load-bearing.** The payload renders once per *group* and reads
-  `.GroupLabels`, so grouping by `[alertname, service, env, tenant]` is what makes each
+  `.GroupLabels`, so grouping by `[alertname, project, environment, tenant]` is what makes each
   call carry a single instance's identity.
 - **The URL is `host.lima.internal:8065`, not `localhost`.** Alertmanager posts from
   inside the cluster, where `localhost` is its own container — same address the
@@ -179,7 +178,7 @@ On the next `terraform apply`, a Datadog Agent (Helm chart `datadog/datadog`) is
 deployed into a `datadog-<workspace>` namespace. It uses Datadog's Prometheus
 autodiscovery to scrape the same `prometheus.io/scrape` pods Prometheus already
 scrapes, so Datadog collects the same `app_*` metrics (counts, latency, success
-rate), tagged by `service` / `env` / `tenant` / `release`. Datadog's OpenMetrics
+rate), tagged by `project` / `environment` / `tenant` / `release`. Datadog's OpenMetrics
 check may name or shape some series (notably histograms) differently from
 Prometheus's raw output. The Agent runs a lean, metrics-only profile (no APM,
 logs, process-agent, orchestrator explorer, or cluster agent).
@@ -195,7 +194,7 @@ kubectl -n datadog-<workspace> get pods      # the datadog agent pod(s) are Runn
 ```
 
 Then check the metrics land in Datadog (Metrics Explorer → `app_request_success_rate`,
-filtered by the `service`/`env` tags). The Agent needs outbound network access to
+filtered by the `project`/`environment` tags). The Agent needs outbound network access to
 your Datadog site.
 
 ### Optional: Datadog monitors
@@ -211,22 +210,27 @@ entirely, so a keyless `terraform plan` stays clean.
 itself, so it needs no equivalent of the PromQL `< 0.95 >= 0.8` band:
 
 ```
-avg(last_1m):avg:app_request_success_rate{owner:<owner>} by {service,env,kube_deployment} < 0.8
+avg(last_1m):avg:app_request_success_rate{owner:<owner>} by {project,environment,tenant} < 0.8
 ```
 
 with `warning = 0.95`, `critical = 0.8`, and `notify_no_data` after 10m to surface the
 `absent`/`down` modes as the first-class Unknown state.
 
-Two deliberate divergences from the PromQL:
+One deliberate divergence from the PromQL:
 
 - **`last_1m` does double duty.** Datadog has no separate sustain duration, so the
   window covers both `avg_over_time(...[20s])` and `for: 1m`.
-- **Grouped by `kube_deployment`, not `tenant`.** Datadog *excludes* any series
-  missing a group-by tag, and the app omits `tenant` entirely when unset, so
-  `by {service,env,tenant}` would silently monitor only the two tenanted `payments`
-  instances. `kube_deployment` is always present and one-per-instance, restoring full
-  coverage while keeping tenants apart — its value already encodes the tenant
-  (`payments-production-globex`).
+
+**Known consequence of grouping on `tenant`.** Datadog *excludes* any series missing a
+group-by tag, and the app omits `tenant` entirely when unset. So this monitor covers only
+`payments-production-acme` and `payments-production-globex` — `checkout-production`,
+`checkout-staging` and `payments-staging` produce no group and drop out silently. No
+error; they simply aren't monitored. Prometheus does *not* behave this way: it keeps those
+series with an empty `tenant`, so the PromQL rules still cover all five.
+
+If the untenanted three need Datadog coverage, either group on `kube_deployment` (always
+present, one per instance, and its value already encodes the tenant —
+`payments-production-globex`) or have the app emit an explicit placeholder tenant.
 
 ### Sharing a Datadog org with teammates
 
@@ -241,7 +245,7 @@ A Datadog org is one namespace for everyone, so `var.owner` scopes four things:
 | Cluster name | `live-status-<owner>-<workspace>` |
 
 The query scope is the one that matters most. Every teammate's Agent ships
-`app_request_success_rate` with identical `service`/`env`/`kube_deployment` tags, so an
+`app_request_success_rate` with identical `project`/`environment`/`tenant` tags, so an
 unscoped `{*}` monitor alerts on *everyone's* pods. Renaming monitors doesn't fix that —
 the data needs the discriminator.
 
@@ -273,21 +277,39 @@ it fires on every transition the monitor notifies about: triggered, warning, rec
 and no data. The webhook name carries the workspace because Datadog webhooks are
 org-global.
 
-The payload is JSON. There's no per-tag variable available in a webhook payload, so the
-group identity arrives as `$ALERT_SCOPE`:
+The payload deliberately mirrors the Alertmanager webhook's flat shape, so one endpoint
+can handle both. `$TAGS[key]` pulls a single tag out by name (it yields an empty string
+when the tag is absent):
 
 ```json
 {
-  "alert_id": "...", "title": "...",
-  "transition": "Triggered",
-  "status": "...", "priority": "...",
-  "scope": "service:payments,env:production,kube_deployment:payments-production-globex",
-  "tags": "...", "link": "...", "date": "..."
+  "alertname": "AppSuccessRate",
+  "environment": "staging",
+  "project": "checkout",
+  "status": "Triggered",
+  "tenant": ""
 }
 ```
 
-`transition` is the health event itself (`Triggered` / `Warn` / `Recovered` / `No Data` /
-`Renotify`), as distinct from `status`.
+**Three fields can't match the Alertmanager body exactly**, and the gaps are structural
+rather than oversights:
+
+| Field | Alertmanager | Datadog | Why |
+|---|---|---|---|
+| `status` | `firing` / `resolved` | `Triggered` / `Warn` / `Recovered` / `No Data` / `Renotify` | Datadog's own vocabulary. Payload templates have no branching, so any mapping has to live in the receiver. |
+| `tenant` | the tag, or absent | always `""` | Not in the monitor's `group_by` — grouping on it would drop every untenanted instance (see above) — and a payload template can't emit a JSON `null`. |
+| `alertname` | per-rule (`AppSuccessRateCritical` vs `…Low`) | constant `AppSuccessRate` | One Datadog monitor spans both tiers via `warning`/`critical` thresholds, so there is no per-tier name to emit. |
+
+If exact parity matters more than the current shape:
+
+- **`alertname` per tier** — split into two monitors. Note Datadog can't express the
+  PromQL `< 0.95 >= 0.8` exclusive band in `monitor_thresholds`, so both would fire below
+  0.8 unless the queries are reworked.
+- **`tenant` populated** — either add it to `group_by` and accept losing the three
+  untenanted instances, or have the receiver parse it out of the deployment name
+  (`payments-production-globex`).
+- **`status` vocabulary** — map `Recovered → resolved`, everything else `→ firing`, in the
+  receiver.
 
 ## Accessing the app UIs
 

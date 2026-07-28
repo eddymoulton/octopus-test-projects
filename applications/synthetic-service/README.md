@@ -31,7 +31,7 @@ Each app's control panel shows identity + live-editable knobs for error rate and
 
 The default stack demonstrates all health states:
 
-| Service (compose) | service | env | tenant | error_rate / mode | Host port | Demonstrates |
+| Service (compose) | project | environment | tenant | error_rate / mode | Host port | Demonstrates |
 |---|---|---|---|---|---|---|
 | checkout-prod | checkout | production | — | 0.002 | 8081 | Healthy (≥0.99) |
 | checkout-staging | checkout | staging | — | 0.03 | 8082 | Degraded (0.95–0.99) |
@@ -57,8 +57,8 @@ Unknown is first-class and reproducible two ways:
 
 Every app metric carries:
 
-- `service` → Project
-- `env` → Environment
+- `project` → Project
+- `environment` → Environment
 - `tenant` → Tenant (optional; omitted entirely when unset)
 - `release` → Release / version
 - `source` → always `local-test` (see below)
@@ -95,8 +95,8 @@ Successful requests log at `debug` and errors at `error`, so at the default `inf
 
 | Env var | Default | Meaning |
 |---|---|---|
-| `APP_PROJECT` | checkout | → `service` label |
-| `APP_ENVIRONMENT` | production | → `env` label |
+| `APP_PROJECT` | checkout | → `project` label |
+| `APP_ENVIRONMENT` | production | → `environment` label |
 | `APP_TENANT` | (unset) | → `tenant` label; omitted when empty |
 | `APP_RELEASE` | 1.0.0 | → `release` label |
 | `APP_MAX_RPS` | 50 | target request rate at full ramp |
@@ -144,16 +144,16 @@ After a change, watch the value move in Prometheus within a scrape or two (5s sc
 app_request_success_rate
 
 # Batched multi-application query, one row per PET (the anti-fan-out pattern)
-avg by (service, env) (app_request_success_rate)
-min by (service, env) (app_request_success_rate)          # worst-of fold
-avg by (service, env, tenant) (app_request_success_rate)  # include tenant dimension
+avg by (project, environment) (app_request_success_rate)
+min by (project, environment) (app_request_success_rate)          # worst-of fold
+avg by (project, environment, tenant) (app_request_success_rate)  # include tenant dimension
 
 # Error ratio from counters (exercises rate())
-sum by (service,env)(rate(app_requests_total{status="error"}[1m]))
-  / sum by (service,env)(rate(app_requests_total[1m]))
+sum by (project,environment)(rate(app_requests_total{status="error"}[1m]))
+  / sum by (project,environment)(rate(app_requests_total[1m]))
 
 # p99 latency (exercises histogram_quantile)
-histogram_quantile(0.99, sum by (le,service,env)(rate(app_request_duration_seconds_bucket[1m])))
+histogram_quantile(0.99, sum by (le,project,environment)(rate(app_request_duration_seconds_bucket[1m])))
 
 # Liveness
 up{job="synthetic-service"}

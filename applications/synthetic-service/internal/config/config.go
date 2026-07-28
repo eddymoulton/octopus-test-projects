@@ -45,8 +45,8 @@ func ParseMode(s string) Mode {
 // Identity is the PET tuple plus release. It is fixed at startup and never
 // mutated, so it needs no locking.
 type Identity struct {
-	Service string // APP_PROJECT     -> service label
-	Env     string // APP_ENVIRONMENT -> env label
+	Service string // APP_PROJECT     -> project label
+	Env     string // APP_ENVIRONMENT -> environment label
 	Tenant  string // APP_TENANT      -> tenant label (omitted entirely when empty)
 	Release string // APP_RELEASE     -> release label (version carrier, NOT a PET scope dimension)
 }

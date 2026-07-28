@@ -14,7 +14,7 @@ package sink
 // DatadogSink would push RequestObservations to a StatsD/DogStatsD agent
 // (e.g. via github.com/DataDog/datadog-go/statsd) instead of serving a pull
 // scrape: counters via Count/Incr, latency via Histogram or Timing, tagged
-// with the same PET identity (service/env/tenant/release) carried as
+// with the same PET identity (project/environment/tenant/release) carried as
 // constant labels on the Prometheus collectors.
 //
 // type DatadogSink struct {
