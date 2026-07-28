@@ -38,17 +38,29 @@ variable "app_image_package" {
 }
 
 # --------------------------------------------------------------------------
-# Datadog (optional). Leave datadog_api_key empty to skip Datadog entirely:
-# no Agent is deployed and the app keeps emitting only to Prometheus, exactly
-# as before. Set it (in the gitignored variables.auto.tfvars) to deploy a
-# Datadog Agent that scrapes the same /metrics the Prometheus path already uses.
-# Only an API key is needed for a metrics-scraping Agent — no Datadog APP key.
+# Datadog (optional), in two independent tiers:
+#
+#   datadog_api_key alone -> the metrics-scraping Agent (datadog.tf). This is
+#     all you need to get app_* metrics into Datadog.
+#   + datadog_app_key     -> additionally manages monitors through the Datadog
+#     API, which is the one thing an API key can't do on its own.
+#
+# Leave datadog_api_key empty to skip Datadog entirely: no Agent, no monitors,
+# and the app keeps emitting only to Prometheus, exactly as before. Set these
+# in the gitignored variables.auto.tfvars.
 # --------------------------------------------------------------------------
 
 variable "datadog_api_key" {
   type        = string
   sensitive   = true
   description = "Datadog API key. Empty (default) = skip Datadog; app emits only to Prometheus, as today."
+  default     = ""
+}
+
+variable "datadog_app_key" {
+  type        = string
+  sensitive   = true
+  description = "Datadog APP key, required only to manage monitors (the Agent doesn't need one). Empty (default) = deploy the Agent but create no monitors."
   default     = ""
 }
 

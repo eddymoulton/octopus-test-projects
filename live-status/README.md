@@ -78,7 +78,8 @@ Add to `live-status/variables.auto.tfvars` (gitignored, so the key stays out of
 git):
 
 ```hcl
-datadog_api_key = "…"             # a Datadog API key (not an APP key)
+datadog_api_key = "…"             # a Datadog API key
+datadog_app_key = "…"             # optional; only needed to create monitors (see below)
 datadog_site    = "datadoghq.com" # optional; your DD site, e.g. us5.datadoghq.com, datadoghq.eu
 ```
 
@@ -104,6 +105,40 @@ kubectl -n datadog-<workspace> get pods      # the datadog agent pod(s) are Runn
 Then check the metrics land in Datadog (Metrics Explorer → `app_request_success_rate`,
 filtered by the `service`/`env` tags). The Agent needs outbound network access to
 your Datadog site.
+
+### Optional: Datadog monitors
+
+Also set `datadog_app_key` to have Terraform manage a Datadog monitor mirroring the
+`alerting_rules.yml` tiers in `prometheus.tf`. The APP key is a second, independent
+gate: the Agent needs only an API key, so with no APP key you still get metrics and
+simply no monitors. With neither key the Datadog provider skips credential validation
+entirely, so a keyless `terraform plan` stays clean.
+
+`datadog_monitor.app_success_rate` folds `AppSuccessRateLow` and
+`AppSuccessRateCritical` into one monitor — Datadog escalates warning → critical
+itself, so it needs no equivalent of the PromQL `< 0.95 >= 0.8` band:
+
+```
+avg(last_1m):avg:app_request_success_rate{*} by {service,env,kube_deployment} < 0.8
+```
+
+with `warning = 0.95`, `critical = 0.8`, and `notify_no_data` after 10m to surface the
+`absent`/`down` modes as the first-class Unknown state.
+
+Two deliberate divergences from the PromQL:
+
+- **`last_1m` does double duty.** Datadog has no separate sustain duration, so the
+  window covers both `avg_over_time(...[20s])` and `for: 1m`.
+- **Grouped by `kube_deployment`, not `tenant`.** Datadog *excludes* any series
+  missing a group-by tag, and the app omits `tenant` entirely when unset, so
+  `by {service,env,tenant}` would silently monitor only the two tenanted `payments`
+  instances. `kube_deployment` is always present and one-per-instance, restoring full
+  coverage while keeping tenants apart — its value already encodes the tenant
+  (`payments-production-globex`).
+
+The monitor watches `{*}`. If you ever run two workspaces against the same Datadog
+account, scope it with the Agent's cluster tag
+(`kube_cluster_name:live-status-<workspace>`) so the two don't overlap.
 
 ## Accessing the app UIs
 
