@@ -26,7 +26,7 @@ locals {
   # would silently repoint each other's alerts at the wrong tunnel. The handle
   # is built from the same local rather than from the resource, so the monitor's
   # message doesn't depend on the webhook's computed attributes.
-  datadog_webhook_enabled = local.datadog_monitors_enabled && var.datadog_webhook_url != ""
+  datadog_webhook_enabled = local.datadog_monitors_enabled && var.public_webhook_url != ""
   datadog_webhook_name    = "octopus-live-status-health-${var.owner}-${replace(terraform.workspace, ".", "-")}"
 
   # The no-tenant monitor gets its own webhook pointing at the same URL. It
@@ -154,7 +154,7 @@ resource "datadog_webhook" "health_events" {
   count = local.datadog_webhook_enabled ? 1 : 0
 
   name      = local.datadog_webhook_name
-  url       = var.datadog_webhook_url
+  url       = var.public_webhook_url
   encode_as = "json"
 
   payload = jsonencode({
@@ -174,7 +174,7 @@ resource "datadog_webhook" "health_events_no_tenant" {
   count = local.datadog_webhook_enabled ? 1 : 0
 
   name      = local.datadog_webhook_no_tenant_name
-  url       = var.datadog_webhook_url
+  url       = var.public_webhook_url
   encode_as = "json"
 
   payload = jsonencode({

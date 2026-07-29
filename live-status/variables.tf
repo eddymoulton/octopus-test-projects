@@ -86,14 +86,67 @@ variable "datadog_app_key" {
   default     = ""
 }
 
-variable "datadog_webhook_url" {
+variable "public_webhook_url" {
   type        = string
-  description = "External URL Datadog POSTs monitor health events to. Must be reachable from Datadog's servers, not just the local machine — hence a tunnel. Empty (default) = create no webhook and leave the monitor notifying nothing. No shared default on purpose: a committed URL would point every teammate's alerts at one person's tunnel."
+  description = "External URL that Datadog and Sumo Logic POST monitor health events to. Both call from their own servers, not from the cluster, so it must be reachable from the public internet rather than just this machine — hence a tunnel. One variable for both because they send the same flat body to the same endpoint. Empty (default) = create no webhook/connection and leave the monitors notifying nothing. No shared default on purpose: a committed URL would point every teammate's alerts at one person's tunnel."
   default     = ""
 
   validation {
-    condition     = var.datadog_webhook_url == "" || startswith(var.datadog_webhook_url, "https://") || startswith(var.datadog_webhook_url, "http://")
-    error_message = "datadog_webhook_url must be empty or an http(s) URL."
+    condition     = var.public_webhook_url == "" || startswith(var.public_webhook_url, "https://") || startswith(var.public_webhook_url, "http://")
+    error_message = "public_webhook_url must be empty or an http(s) URL."
+  }
+}
+
+# Renamed to public_webhook_url, now that Sumo Logic needs the same tunnel URL.
+# Kept declared, and required to be empty, only because a stale value in
+# variables.auto.tfvars would otherwise be an ignorable warning rather than an
+# error — and the silent consequence is that no Datadog webhook gets created.
+# Delete this block once variables.auto.tfvars no longer sets it.
+variable "datadog_webhook_url" {
+  type    = string
+  default = ""
+
+  validation {
+    condition     = var.datadog_webhook_url == ""
+    error_message = "datadog_webhook_url has been renamed to public_webhook_url; rename the key in variables.auto.tfvars."
+  }
+}
+
+# --------------------------------------------------------------------------
+# Sumo Logic (optional), a single credential tier.
+#
+# Unlike Datadog — where the Agent needs only an API key and monitors need a
+# second APP key — Sumo can't be split: the ingest endpoint is itself created
+# through the API, so the same access pair gates collection and alerting.
+# public_webhook_url remains an independent third gate, as it is for Datadog.
+#
+# Leave these empty to skip Sumo Logic entirely: no hosted collector, no HTTP
+# source, no OTel collector in the cluster, no monitors. Set them in the
+# gitignored variables.auto.tfvars.
+# --------------------------------------------------------------------------
+
+variable "sumologic_access_id" {
+  type        = string
+  sensitive   = true
+  description = "Sumo Logic Access ID. Empty (default) = skip Sumo Logic entirely."
+  default     = ""
+}
+
+variable "sumologic_access_key" {
+  type        = string
+  sensitive   = true
+  description = "Sumo Logic Access Key. Empty (default) = skip Sumo Logic entirely."
+  default     = ""
+}
+
+variable "sumologic_environment" {
+  type        = string
+  description = "Sumo Logic deployment the org lives in (au, us1, us2, ca, de, eu, fed, in, jp, kr). Must match the org or every API call fails; validated here so a typo fails the plan rather than the apply."
+  default     = "au"
+
+  validation {
+    condition     = contains(["au", "us1", "us2", "ca", "de", "eu", "fed", "in", "jp", "kr"], var.sumologic_environment)
+    error_message = "sumologic_environment must be one of: au, us1, us2, ca, de, eu, fed, in, jp, kr."
   }
 }
 

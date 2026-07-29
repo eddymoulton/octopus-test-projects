@@ -171,7 +171,7 @@ git):
 datadog_api_key     = "…"             # a Datadog API key
 datadog_app_key     = "…"             # optional; only needed to create monitors (see below)
 datadog_site        = "datadoghq.com" # optional; your DD site, e.g. us5.datadoghq.com, datadoghq.eu
-datadog_webhook_url = "https://….trycloudflare.com"  # optional; see "Datadog webhook"
+public_webhook_url  = "https://….trycloudflare.com"  # optional; shared by Datadog + Sumo Logic
 ```
 
 On the next `terraform apply`, a Datadog Agent (Helm chart `datadog/datadog`) is
@@ -277,9 +277,14 @@ Alertmanager path is entirely local and has no shared surface to collide on.
 ### Datadog webhook
 
 `datadog_webhook.health_events` and `datadog_webhook.health_events_no_tenant` POST every
-health event to `var.datadog_webhook_url`, which is **empty by default** — a committed URL
+health event to `var.public_webhook_url`, which is **empty by default** — a committed URL
 would point every teammate's alerts at one person's tunnel. It's a third gate on top of the
 APP key: blank the URL and neither webhook is created.
+
+The variable is deliberately provider-neutral: Sumo Logic's monitors call the same endpoint
+with the same body, so both providers read one URL. It was named `datadog_webhook_url` until
+Sumo Logic arrived; the old name is still declared and now *rejects* any non-empty value, so
+a stale entry in `variables.auto.tfvars` fails the plan instead of being silently ignored.
 
 **One webhook per monitor, both pointing at the same URL.** They are identical but for the
 constant `alertname` they emit (`AppSuccessRate` vs `AppSuccessRateNoTenant`). Payload
@@ -360,6 +365,17 @@ Reaching Traefik's `:80` entrypoint from the host differs by platform:
 terraform init && terraform validate      # schema-clean
 terraform plan                            # once placeholders are filled
 ```
+
+Both optional backends are gated so a credential-free plan stays clean, by different
+means. The Datadog provider is told not to authenticate (`validate =
+local.datadog_monitors_enabled`), because it would otherwise fail at configure time even
+with every resource using it at `count = 0`. The Sumo Logic provider has no such flag and
+takes its credentials unconditionally, but tolerates empty ones: with no Sumo access pair,
+`terraform plan` succeeds and creates nothing.
+
+Note that `terraform validate` does **not** evaluate variable values, so variable
+`validation` blocks only fire on `plan`/`apply`. A config that validates clean can still
+fail the plan on a bad or renamed variable.
 
 ## Notes
 

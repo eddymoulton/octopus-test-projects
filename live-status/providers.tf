@@ -19,6 +19,11 @@ terraform {
       source  = "DataDog/datadog"
       version = "4.16.0"
     }
+
+    sumologic = {
+      source  = "SumoLogic/sumologic"
+      version = "3.2.10"
+    }
   }
 }
 
@@ -49,4 +54,13 @@ provider "datadog" {
   app_key  = var.datadog_app_key
   api_url  = "https://api.${var.datadog_site}/"
   validate = local.datadog_monitors_enabled
+}
+
+# Talks to the Sumo Logic API, not the cluster: it creates the hosted collector
+# and HTTP source the in-cluster OTel collector ships to (sumologic.tf), plus the
+# monitors and webhook connections.
+provider "sumologic" {
+  access_id   = var.sumologic_access_id
+  access_key  = var.sumologic_access_key
+  environment = var.sumologic_environment
 }
