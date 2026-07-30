@@ -121,6 +121,15 @@ resource "helm_release" "prometheus" {
       name  = "server.service.servicePort"
       value = "9090"
     },
+    # The alert payload's `link` carries GeneratorURL, which Prometheus builds
+    # from --web.external-url. Unset, that resolves to the pod's own address, so
+    # the link arrives at Octopus pointing somewhere unreachable — the same trap
+    # as the Alertmanager webhook needing host.lima.internal rather than
+    # localhost. Point it at the Ingress host the UI is already served on.
+    {
+      name  = "server.baseURL"
+      value = "http://prometheus-${local.monitoring_suffix}.localhost"
+    },
     # Ingress at http://prometheus-<workspace>.localhost via Traefik.
     {
       name  = "server.ingress.enabled"
@@ -204,12 +213,32 @@ resource "helm_release" "prometheus" {
                   # runs with missingkey=zero over a map[string]string, so an
                   # untenanted instance renders tenant as "" rather than
                   # "<no value>".
+                  #
+                  # `value` is the exception to the pass-through: $value is a
+                  # rule-evaluation variable and Alertmanager's templates never
+                  # see it, so each rule below copies it into an annotation and
+                  # this reads it back out. .CommonAnnotations rather than
+                  # .Alerts[0] because group_by narrows a group to a single
+                  # application instance — one alert, so "common" is that
+                  # alert's own value.
                   payload = {
                     project     = "{{ .GroupLabels.project }}"
                     environment = "{{ .GroupLabels.environment }}"
                     tenant      = "{{ .GroupLabels.tenant }}"
                     status      = "{{ .Status }}"
                     alertname   = "{{ .GroupLabels.alertname }}"
+                    value       = "{{ .CommonAnnotations.value }}"
+
+                    # provider/origin are constants rather than templated: this
+                    # config names the instance, so there is nothing to look up
+                    # at alert time. GeneratorURL is the only one that has to
+                    # come from the notification — it deep-links to the PromQL
+                    # expression that fired, and is built from the server's
+                    # --web.external-url (see server.baseURL above, without
+                    # which it points at the pod and Octopus can't open it).
+                    provider = "prometheus"
+                    origin   = local.rig_instance
+                    link     = "{{ (index .Alerts 0).GeneratorURL }}"
                   }
                 }
               ]
@@ -223,6 +252,15 @@ resource "helm_release" "prometheus" {
           groups = [
             {
               name = "live-status"
+              # Every rule carries a `value` annotation purely so the webhook
+              # payload can report the number that tripped it — the annotation
+              # is the only channel, since $value doesn't survive past rule
+              # evaluation into Alertmanager.
+              #
+              # printf "%.4f" is load-bearing, not cosmetic: $value is a
+              # float64 and Go prints it in full, so an unformatted 0.9 leaves
+              # here as 0.8999999999999999. Four places is well past the
+              # precision any of these thresholds care about.
               rules = [
                 # app_up is only ever 1, so this trips only on partial scrape gaps.
                 {
@@ -235,6 +273,7 @@ resource "helm_release" "prometheus" {
                   annotations = {
                     summary     = "app_up degraded for {{ $labels.project }}/{{ $labels.environment }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
                     description = "20s-averaged app_up is {{ $value }} (< 1) for project={{ $labels.project }} environment={{ $labels.environment }} tenant={{ $labels.tenant }}."
+                    value       = "{{ $value | printf \"%.4f\" }}"
                   }
                 },
                 # Warning band [0.8, 0.95); the >= 0.8 bound keeps it exclusive
@@ -249,6 +288,7 @@ resource "helm_release" "prometheus" {
                   annotations = {
                     summary     = "Success rate low for {{ $labels.project }}/{{ $labels.environment }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
                     description = "20s-averaged app_request_success_rate is {{ $value }} (in [0.8, 0.95)) for project={{ $labels.project }} environment={{ $labels.environment }} tenant={{ $labels.tenant }}."
+                    value       = "{{ $value | printf \"%.4f\" }}"
                   }
                 },
                 {
@@ -261,6 +301,7 @@ resource "helm_release" "prometheus" {
                   annotations = {
                     summary     = "Success rate critical for {{ $labels.project }}/{{ $labels.environment }}{{ if $labels.tenant }} (tenant {{ $labels.tenant }}){{ end }}"
                     description = "20s-averaged app_request_success_rate is {{ $value }} (< 0.8) for project={{ $labels.project }} environment={{ $labels.environment }} tenant={{ $labels.tenant }}."
+                    value       = "{{ $value | printf \"%.4f\" }}"
                   }
                 },
                 # A hard-down pod stops emitting app_up, so catch a full outage
@@ -275,6 +316,13 @@ resource "helm_release" "prometheus" {
                   annotations = {
                     summary     = "Scrape target down: {{ $labels.namespace }}/{{ $labels.pod }}"
                     description = "Prometheus target {{ $labels.instance }} (pod {{ $labels.pod }}) has up == 0 for over 1m; app_up is absent while it is down."
+                    # Odd one out, deliberately: this rule's $value is the `up`
+                    # series, not a success rate, and the rule only fires on
+                    # up == 0 — so this always reports 0.0000. Kept anyway so
+                    # every alert from this group POSTs the same shape; a
+                    # receiver reading `value` as a rate has to branch on
+                    # alertname regardless.
+                    value = "{{ $value | printf \"%.4f\" }}"
                   }
                 }
               ]

@@ -1,4 +1,11 @@
 locals {
+  # Identifies this deployment of the rig in every webhook body, alongside a
+  # constant `provider`. Deliberately shared rather than written per file: the
+  # receiver keys on it to recognise that a Prometheus alert and a Sumo alert
+  # came from the same place, so three copies that could drift apart would
+  # defeat the point.
+  rig_instance = "live-status-${var.owner}-${replace(terraform.workspace, ".", "-")}"
+
   # Local Octopus Server address (Terraform provider talks to this).
   octopus_address = "http://localhost:8065/"
 

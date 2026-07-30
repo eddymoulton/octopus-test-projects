@@ -50,12 +50,24 @@ locals {
   # resolution_payload is Optional+Computed, so an unset value is whatever the
   # API decides to store. Setting it explicitly is what guarantees recovery isn't
   # the one transition that arrives in a different shape.
+  #
+  # {{TriggerValue}} is the value that crossed the threshold. No round-trip
+  # needed, unlike Prometheus — there $value exists only during rule evaluation
+  # and has to be smuggled to Alertmanager through an annotation; Sumo hands the
+  # payload template the number directly.
+  # {{AlertResponseUrl}} is the alert's own page. Sumo also offers {{SourceURL}}
+  # (the monitor's config) and {{QueryURL}} (the underlying query); one link is
+  # enough, since a receiver that knows the connection can reach the rest.
   sumologic_payload = jsonencode({
     alertname   = "AppSuccessRate"
     environment = "{{ResultsJson.environment}}"
     project     = "{{ResultsJson.project}}"
     status      = "{{TriggerType}}"
     tenant      = "{{ResultsJson.tenant}}"
+    value       = "{{TriggerValue}}"
+    provider    = "sumologic"
+    origin      = local.rig_instance
+    link        = "{{AlertResponseUrl}}"
   })
 
   # tenant is a hardcoded empty string, not {{ResultsJson.tenant}}. Sumo emits an
@@ -72,6 +84,10 @@ locals {
     project     = "{{ResultsJson.project}}"
     status      = "{{TriggerType}}"
     tenant      = ""
+    value       = "{{TriggerValue}}"
+    provider    = "sumologic"
+    origin      = local.rig_instance
+    link        = "{{AlertResponseUrl}}"
   })
 }
 
@@ -324,7 +340,7 @@ resource "sumologic_connection" "octopus_health" {
   resolution_payload = local.sumologic_payload
 }
 
-# Same URL, same five keys, different constant alertname — so the receiver can
+# Same URL, same six keys, different constant alertname — so the receiver can
 # tell a tenant-grouped event from a project/environment-grouped one. `tenant` is
 # kept in the body (rendering "") rather than dropped, so every provider and
 # every monitor here POST the same shape.

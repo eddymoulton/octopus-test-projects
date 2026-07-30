@@ -157,12 +157,22 @@ resource "datadog_webhook" "health_events" {
   url       = var.public_webhook_url
   encode_as = "json"
 
+  # No `value` key: Datadog has no webhook variable for the evaluated number —
+  # it reaches the body only inside the rendered message ($EVENT_MSG), as prose.
+  # Left out rather than shipped as a sentence the receiver would have to parse.
+  #
+  # $LINK is the event that triggered the webhook. origin is a constant for the
+  # same reason as the other two providers; $ORG_NAME is available if the Datadog
+  # org itself ever needs identifying, but that is what the connection knows.
   payload = jsonencode({
     alertname   = "AppSuccessRate"
     environment = "$TAGS[environment]"
     project     = "$TAGS[project]"
     status      = "$ALERT_TRANSITION"
     tenant      = "$TAGS[tenant]"
+    provider    = "datadog"
+    origin      = local.rig_instance
+    link        = "$LINK"
   })
 }
 
@@ -183,6 +193,9 @@ resource "datadog_webhook" "health_events_no_tenant" {
     project     = "$TAGS[project]"
     status      = "$ALERT_TRANSITION"
     tenant      = "$TAGS[tenant]"
+    provider    = "datadog"
+    origin      = local.rig_instance
+    link        = "$LINK"
   })
 }
 
