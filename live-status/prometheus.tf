@@ -18,6 +18,11 @@
 #
 # Everything cluster-scoped here is suffixed with the workspace so the config
 # can be applied into several workspaces against the same cluster.
+#
+# Gated on var.prometheus_enabled, which defaults true: false makes every
+# resource here count 0, taking the alerting rules and the Alertmanager webhook
+# with them. Same count-0 shape as the datadog.tf / sumologic.tf tiers, inverted
+# — those are off until credentials arrive, this one needs only the cluster.
 
 locals {
   # Everything this file creates that lives in a cluster-wide namespace — the
@@ -25,6 +30,11 @@ locals {
   # Ingress hostname — has to carry the workspace, or a second workspace
   # collides with the first. Matches the suffix agent.tf and datadog.tf use.
   monitoring_suffix = replace(terraform.workspace, ".", "-")
+
+  # Held as a plain string, not read back off the resource, so outputs.tf can
+  # name the namespace in its port-forward hints without indexing a resource
+  # that is count 0 when the tier is off.
+  monitoring_namespace = "live-status-monitoring-${local.monitoring_suffix}"
 
   # Shared base query for the success-rate alert tiers.
   success_rate_20s = "avg by (project, environment, tenant) (avg_over_time(app_request_success_rate[20s]))"
@@ -37,19 +47,25 @@ locals {
 }
 
 resource "kubernetes_namespace_v1" "monitoring" {
+  count = var.prometheus_enabled ? 1 : 0
+
   metadata {
-    name = "live-status-monitoring-${local.monitoring_suffix}"
+    name = local.monitoring_namespace
   }
 }
 
 resource "helm_release" "prometheus" {
+  count = var.prometheus_enabled ? 1 : 0
+
   name       = "prometheus"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "prometheus"
   version    = "29.17.0"
-  namespace  = kubernetes_namespace_v1.monitoring.metadata[0].name
-  atomic     = true
-  timeout    = 300
+  # Via the resource rather than local.monitoring_namespace: the reference is
+  # what orders the namespace ahead of the release.
+  namespace = kubernetes_namespace_v1.monitoring[0].metadata[0].name
+  atomic    = true
+  timeout   = 300
 
   set = [
     # Required for any notification at all; also auto-wires the server's

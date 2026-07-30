@@ -60,6 +60,25 @@ variable "app_image_package" {
 }
 
 # --------------------------------------------------------------------------
+# Prometheus (on by default), the rig's baseline metrics tier.
+#
+# The opposite shape to the Datadog and Sumo Logic tiers below: those are gated
+# on credentials and stay off until you supply them, whereas Prometheus needs
+# nothing but the cluster, so it defaults on and has to be switched off
+# explicitly. Off means every resource in prometheus.tf is count 0 — no
+# monitoring namespace, no Helm release, and so no alerting rules and no
+# Alertmanager webhook to Octopus. The app is untouched and keeps carrying its
+# prometheus.io scrape annotations, so turning this back on resumes scraping
+# with no redeploy.
+# --------------------------------------------------------------------------
+
+variable "prometheus_enabled" {
+  type        = bool
+  description = "Deploy the in-cluster Prometheus + Alertmanager stack (prometheus.tf). false = no monitoring namespace, no Helm release, no alerting rules, and nothing posting Prometheus alerts to the Octopus webhook."
+  default     = true
+}
+
+# --------------------------------------------------------------------------
 # Datadog (optional), in two independent tiers:
 #
 #   datadog_api_key alone -> the metrics-scraping Agent (datadog.tf). This is

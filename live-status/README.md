@@ -18,8 +18,9 @@ deployment processes as modules under `../deployment_processes/`).
   annotation-based pod scraping, Service `prometheus:9090`, and Ingresses at
   `http://prometheus-<workspace>.localhost` and `http://alertmanager-<workspace>.localhost`.
   Comes up at
-  `terraform apply` (no Octopus project involved). Migrating a cluster that already has an
-  Octopus-deployed Prometheus in this namespace? Delete it first
+  `terraform apply` (no Octopus project involved). Set `prometheus_enabled = false` to skip the whole
+  tier — see [Optional: turning Prometheus off](#optional-turning-prometheus-off). Migrating a cluster
+  that already has an Octopus-deployed Prometheus in this namespace? Delete it first
   (`kubectl delete ns live-status-monitoring-<workspace>`) so Terraform doesn't collide with the
   existing resources.
 - checkout (untenanted) and payments (tenanted: `acme`, `globex`) projects →
@@ -156,6 +157,27 @@ Watch it work: drive an instance unhealthy from its control panel (error rate > 
 check Alertmanager at `http://alertmanager-<workspace>.localhost` (or
 `kubectl -n live-status-monitoring-<workspace> port-forward svc/prometheus-alertmanager 9093:9093`).
 Alerts need `for: 1m` plus `group_wait` before the first call goes out.
+
+## Optional: turning Prometheus off
+
+Prometheus is the one tier that's on by default — it needs only the cluster, where Datadog and
+Sumo Logic need credentials — so it's disabled explicitly rather than by withholding a key:
+
+```hcl
+prometheus_enabled = false
+```
+
+That makes every resource in `prometheus.tf` `count = 0`: no `live-status-monitoring-<workspace>`
+namespace, no Helm release, and with them go the four alerting rules and the Alertmanager webhook,
+so **nothing in this rig POSTs Prometheus alerts to Octopus**. Use it when you're exercising the
+Datadog or Sumo Logic path on its own, or running against a cluster that already has its own
+Prometheus.
+
+The app is unaffected: pods keep their `prometheus.io/scrape` annotations, so re-enabling the tier
+picks scraping back up with no redeploy. The Datadog Agent and the Sumo OTel collector each live in
+their own namespace and read the same annotations, so both keep working with this off. The
+`prometheus_ui_hint` and `alertmanager_ui_hint` outputs report the tier as disabled instead of
+printing URLs.
 
 ## Optional: mirror metrics to Datadog
 
