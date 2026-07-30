@@ -126,7 +126,7 @@ Each app exposes:
 You can control health states in two ways:
 
 1. Via `docker-compose.yml`: set environment variables before startup. Restart containers to apply changes.
-2. Via the web control panel: visit each app's host port (8081–8085) to live-edit `error_rate` and `mode` without restarting.
+2. Via the web control panel: visit each app's host port (8081–8085) to live-edit `error_rate` and `mode` without restarting. The **Quick change** buttons there apply an error rate in one click, without touching the other knobs: *Healthy* sets 0.5%, *Unhealthy* sets 80%.
 
 To reach specific states:
 

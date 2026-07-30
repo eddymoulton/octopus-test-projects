@@ -77,6 +77,10 @@
   }
   button.secondary { background: var(--border); color: var(--text); }
   button:active { transform: translateY(1px); }
+  .presets { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.75rem; grid-column: 1 / -1; }
+  .presets-label { color: var(--muted); font-size: 0.8rem; }
+  button.preset-good { background: var(--good); }
+  button.preset-bad { background: var(--bad); }
   #applyStatus { color: var(--muted); font-size: 0.8rem; margin-top: 0.4rem; grid-column: 1 / -1; min-height: 1.2em; }
 </style>
 
@@ -141,6 +145,11 @@
         <button id="applyBtn" type="button">Apply</button>
         <button id="restartBtn" type="button" class="secondary">Restart ramp</button>
       </div>
+      <div class="presets">
+        <span class="presets-label">Quick change</span>
+        <button id="healthyBtn" type="button" class="preset-good">Healthy &mdash; 0.5% errors</button>
+        <button id="unhealthyBtn" type="button" class="preset-bad">Unhealthy &mdash; 80% errors</button>
+      </div>
       <div id="applyStatus"></div>
     </form>
   </div>
@@ -164,11 +173,22 @@
     { id: "mode",          patch: "mode",                    kind: "string" }
   ];
 
+  // Quick-change presets: one click jumps the error rate to a known-good or
+  // known-bad value, in the percentage unit the errorRate input displays.
+  var ERROR_RATE_PRESETS = [
+    { id: "healthyBtn",   percent: 0.5 },
+    { id: "unhealthyBtn", percent: 80 }
+  ];
+
   // Last settings snapshot received from the server, used both to populate
   // inputs and to diff against on Apply (so we only send changed fields).
   var lastSettings = null;
 
   function el(id) { return document.getElementById(id); }
+
+  function fieldById(id) {
+    return FIELDS.filter(function (field) { return field.id === id; })[0];
+  }
 
   // Convert between the wire value (what the API carries) and the shown value
   // (what the input displays). The rounding sheds binary-float noise so a
@@ -308,6 +328,13 @@
       return;
     }
 
+    postPatch(patch);
+  }
+
+  // postPatch sends a SettingsPatch, renders the state the server returns, and
+  // reports the outcome on the status line.
+  function postPatch(patch) {
+    var status = el("applyStatus");
     fetch("/api/state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -326,6 +353,16 @@
       });
   }
 
+  // A preset posts its error rate straight away rather than going through
+  // applyPatch's diff, so it works with no settings snapshot loaded and leaves
+  // the other knobs untouched. The input is written directly because
+  // renderKnobs would otherwise keep showing an unapplied edit in that field.
+  function applyErrorRatePreset(percent) {
+    var field = fieldById("errorRate");
+    el(field.id).value = percent;
+    postPatch({ error_rate: toWire(field, percent) });
+  }
+
   function restartRamp() {
     fetch("/api/ramp/restart", { method: "POST" })
       .then(function (r) { return r.json(); })
@@ -335,6 +372,11 @@
 
   el("applyBtn").addEventListener("click", applyPatch);
   el("restartBtn").addEventListener("click", restartRamp);
+  ERROR_RATE_PRESETS.forEach(function (preset) {
+    el(preset.id).addEventListener("click", function () {
+      applyErrorRatePreset(preset.percent);
+    });
+  });
 
   fetchState();
   setInterval(fetchState, 1000);
