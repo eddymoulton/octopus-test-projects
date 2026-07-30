@@ -59,8 +59,18 @@ provider "datadog" {
 # Talks to the Sumo Logic API, not the cluster: it creates the hosted collector
 # and HTTP source the in-cluster OTel collector ships to (sumologic.tf), plus the
 # monitors and webhook connections.
+#
+# Placeholders when the tier is off, rather than the datadog block's
+# `validate = false` — this provider has no such flag: access_id and access_key
+# are Required in its schema and it additionally rejects empty strings at
+# configure time. Terraform configures a provider whenever a resource block
+# references it, before any `count` is evaluated, so a credential-less plan
+# reaches that check even though every resource in sumologic.tf is count 0. A
+# non-empty value is the only thing that gets past it. Nothing is sent anywhere:
+# the provider doesn't authenticate until a resource makes a call, and when
+# local.sumologic_enabled is false there are none.
 provider "sumologic" {
-  access_id   = var.sumologic_access_id
-  access_key  = var.sumologic_access_key
+  access_id   = local.sumologic_enabled ? var.sumologic_access_id : "disabled"
+  access_key  = local.sumologic_enabled ? var.sumologic_access_key : "disabled"
   environment = var.sumologic_environment
 }
