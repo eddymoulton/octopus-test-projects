@@ -209,8 +209,10 @@ resource "datadog_webhook" "health_events_no_tenant" {
 # SCOPE: this monitor sees only the tenanted instances. Datadog excludes any
 # series missing a group-by tag, and the app omits `tenant` entirely when unset,
 # so payments-production-acme and payments-production-globex produce groups and
-# checkout-production, checkout-staging and payments-staging silently produce
-# none. That exclusion is not worked around here — the sibling
+# checkout-production-untenanted, checkout-staging-untenanted and
+# payments-staging-untenanted silently produce none. (Those three carry
+# `untenanted` in their *name* only — the label itself is still unset, which is
+# what Datadog excludes on.) That exclusion is not worked around here — the sibling
 # app_success_rate_no_tenant monitor below covers the same five instances without
 # the tenant dimension, so between the pair every instance is monitored and both
 # payload shapes reach the receiver.

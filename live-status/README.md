@@ -89,8 +89,9 @@ more than one workspace at a time:
 - **The app namespaces**, `live-status-<environment>` — they come from the Octopus
   deployment process (`../deployment_processes/synthetic_service_process`), which names
   them from the Octopus environment, not the Terraform workspace.
-- **The app Ingress hosts**, `<project>-<environment>[-<tenant>].localhost`, for the same
-  reason.
+- **The app Ingress hosts**, `<project>-<environment>-<tenant>.localhost`, for the same
+  reason. A deployment with no tenant fills that last segment with `untenanted`, so the
+  host always has three segments.
 
 Prometheus scrapes by pod annotation across all namespaces, so each workspace's Prometheus
 picks up whatever synthetic-service pods exist, whichever workspace deployed them.
@@ -243,9 +244,11 @@ the `absent`/`down` modes as the first-class Unknown state, and each is tagged
 
 **Why a pair.** Datadog *excludes* any series missing a group-by tag, and the app omits
 `tenant` entirely when unset, so the tenant-grouped monitor covers only
-`payments-production-acme` and `payments-production-globex` — `checkout-production`,
-`checkout-staging` and `payments-staging` produce no group and drop out silently. No
-error; they simply aren't monitored. (Prometheus does *not* behave this way: it keeps
+`payments-production-acme` and `payments-production-globex` — `checkout-production-untenanted`,
+`checkout-staging-untenanted` and `payments-staging-untenanted` produce no group and drop out
+silently. No error; they simply aren't monitored. (`untenanted` in those names is the instance
+name's tenant slot, not a `tenant` label value: the label stays unset, which is what Datadog
+excludes on.) (Prometheus does *not* behave this way: it keeps
 those series with an empty `tenant`, so the PromQL rules cover all five from one rule.)
 Rather than work around the exclusion, the second monitor groups one dimension shallower
 on tags that are always present. Between the pair, every instance is monitored and the
@@ -263,9 +266,9 @@ Two deliberate divergences from the PromQL:
   worst-of fold the README's example PromQL uses) if masking matters more than symmetry.
 
 The other route to covering the untenanted three from a single monitor would be grouping on
-`kube_deployment` (always present, one per instance, and its value already encodes the
-tenant — `payments-production-globex`), or having the app emit an explicit placeholder
-tenant.
+`kube_deployment` (always present, one per instance, and its value now encodes the tenant slot
+for every instance — `payments-production-globex`, `payments-staging-untenanted`), or having the
+app emit an explicit placeholder tenant.
 
 ### Sharing a Datadog org with teammates
 
@@ -364,9 +367,11 @@ If exact parity matters more than the current shape:
 
 ## Accessing the app UIs
 
-Each synthetic-service instance gets a Service + Traefik Ingress at `http://<instance>.localhost`
-(e.g. `checkout-production.localhost`, `payments-production-acme.localhost`). Browsers route `*.localhost` to
-loopback automatically; for `curl`, add an `/etc/hosts` entry (`127.0.0.1 checkout-production.localhost`).
+Each synthetic-service instance gets a Service + Traefik Ingress at `http://<instance>.localhost`,
+where the instance is `<project>-<environment>-<tenant>` and a deployment with no tenant fills that
+last segment with `untenanted` (e.g. `payments-production-acme.localhost`,
+`checkout-production-untenanted.localhost`). Browsers route `*.localhost` to loopback automatically;
+for `curl`, add an `/etc/hosts` entry (`127.0.0.1 checkout-production-untenanted.localhost`).
 
 Reaching Traefik's `:80` entrypoint from the host differs by platform:
 
@@ -378,7 +383,7 @@ Reaching Traefik's `:80` entrypoint from the host differs by platform:
   install an ingress controller. Docker Desktop publishes LoadBalancer services on `localhost`, so once
   Traefik is running, `http://<instance>.localhost` resolves through it.
 - Fallback (any platform, no Ingress needed): port-forward straight to a pod:
-  `kubectl -n live-status-production port-forward deploy/checkout-production 8080:8080` → http://localhost:8080.
+  `kubectl -n live-status-production port-forward deploy/checkout-production-untenanted 8080:8080` → http://localhost:8080.
   Prometheus: `kubectl -n live-status-monitoring-<workspace> port-forward svc/prometheus 9090:9090`.
 
 ## Verify the Terraform itself

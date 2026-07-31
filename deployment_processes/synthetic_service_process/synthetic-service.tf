@@ -2,9 +2,17 @@ locals {
   # PET-derived identity, resolved by Octopus at deploy time.
   #   service = project name (checkout|payments)
   #   env     = environment name (production|staging)
-  #   tenant  = deployment tenant (empty for untenanted checkout)
+  #   tenant  = deployment tenant, or `untenanted` where the deployment has none
+  #
+  # The tenant slot is always present, so every instance name — and so every
+  # Ingress host — has the same three segments whether or not a tenant is
+  # involved. `untenanted` is the value Octopus itself uses for a tenant-less
+  # deployment (the Octopus.Deployment.Tenant.Id annotation it writes onto these
+  # resources). Note this is the deployed *name* only: APP_TENANT below stays
+  # empty when there is no tenant, keeping the `tenant` metric label absent
+  # rather than turning it into a real-looking value.
   app_namespace = "live-status-#{Octopus.Environment.Name | ToLower}"
-  app_instance  = "#{Octopus.Project.Name | ToLower}-#{Octopus.Environment.Name | ToLower}#{if Octopus.Deployment.Tenant.Name}-#{Octopus.Deployment.Tenant.Name | ToLower}#{/if}"
+  app_instance  = "#{Octopus.Project.Name | ToLower}-#{Octopus.Environment.Name | ToLower}-#{if Octopus.Deployment.Tenant.Name}#{Octopus.Deployment.Tenant.Name | ToLower}#{else}untenanted#{/if}"
 
   app_yaml = <<-EOT
 apiVersion: v1
@@ -81,7 +89,8 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-  # Reachable at http://<instance>.localhost (e.g. checkout-production.localhost).
+  # Reachable at http://<instance>.localhost (e.g.
+  # checkout-production-untenanted.localhost, payments-production-acme.localhost).
   # Browsers route *.localhost to loopback; for curl add an /etc/hosts entry.
   - host: "${local.app_instance}.localhost"
     http:
@@ -99,8 +108,8 @@ EOT
   # (#{...}) resolves at deploy time; $${..} are bash vars ($$ escapes $ in the
   # Terraform heredoc so it renders as a single $).
   access_info_script = <<-EOT
-INSTANCE="#{Octopus.Project.Name | ToLower}-#{Octopus.Environment.Name | ToLower}#{if Octopus.Deployment.Tenant.Name}-#{Octopus.Deployment.Tenant.Name | ToLower}#{/if}"
-NS="live-status-#{Octopus.Environment.Name | ToLower}"
+INSTANCE="${local.app_instance}"
+NS="${local.app_namespace}"
 HOST="$${INSTANCE}.localhost"
 
 if command -v write_highlight >/dev/null 2>&1; then
