@@ -13,3 +13,8 @@ variable "k8s_namespace" {
 variable "target_role" {
   type = string
 }
+
+variable "include_second_workload" {
+  type    = bool
+  default = false
+}

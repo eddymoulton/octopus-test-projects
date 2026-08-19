@@ -15,8 +15,9 @@ resource "octopusdeploy_project" "guestbook" {
 module "guestbook_process" {
   source = "../deployment_processes/guestbook_process"
 
-  space_id      = octopusdeploy_space.main.id
-  project_id    = octopusdeploy_project.guestbook.id
-  k8s_namespace = octopusdeploy_project.guestbook.slug
-  target_role   = "k8s-agent"
+  space_id                = octopusdeploy_space.main.id
+  project_id              = octopusdeploy_project.guestbook.id
+  k8s_namespace           = octopusdeploy_project.guestbook.slug
+  target_role             = "k8s-agent"
+  include_second_workload = true
 }
