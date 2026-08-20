@@ -52,8 +52,9 @@ resource "octopusdeploy_space" "monitoring" {
 }
 
 resource "octopusdeploy_environment" "example" {
-  name     = "Example"
-  space_id = octopusdeploy_space.monitoring.id
+  name       = "Example"
+  space_id   = octopusdeploy_space.monitoring.id
+  sort_order = 0
 }
 
 resource "octopusdeploy_polling_subscription_id" "agent_subscription_id" {}

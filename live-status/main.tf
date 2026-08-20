@@ -28,13 +28,15 @@ resource "octopusdeploy_space" "main" {
 }
 
 resource "octopusdeploy_environment" "staging" {
-  name     = "Staging"
-  space_id = octopusdeploy_space.main.id
+  name       = "Staging"
+  space_id   = octopusdeploy_space.main.id
+  sort_order = 0
 }
 
 resource "octopusdeploy_environment" "production" {
-  name     = "Production"
-  space_id = octopusdeploy_space.main.id
+  name       = "Production"
+  space_id   = octopusdeploy_space.main.id
+  sort_order = 1
 }
 
 resource "octopusdeploy_lifecycle" "main" {

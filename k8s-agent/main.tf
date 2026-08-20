@@ -18,13 +18,15 @@ resource "octopusdeploy_space" "main" {
 }
 
 resource "octopusdeploy_environment" "test" {
-  name     = "Test"
-  space_id = octopusdeploy_space.main.id
+  name       = "Test"
+  space_id   = octopusdeploy_space.main.id
+  sort_order = 0
 }
 
 resource "octopusdeploy_environment" "prod" {
-  name     = "Production"
-  space_id = octopusdeploy_space.main.id
+  name       = "Production"
+  space_id   = octopusdeploy_space.main.id
+  sort_order = 1
 }
 
 resource "octopusdeploy_lifecycle" "main" {
